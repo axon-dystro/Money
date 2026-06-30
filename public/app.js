@@ -38,7 +38,53 @@ function startCostEdit(type,id){editCost={type,id}; render();}
 function cancelCostEdit(){editCost=null; render();}
 async function saveCostEdit(e,type,id){e.preventDefault(); const fd=new FormData(e.target); editCost=null; await api(`/api/cost/${type}/${id}`,{method:'PATCH',body:JSON.stringify({name:fd.get('name'),amount:num(fd.get('amount'))})});}
 function renderCats(){q('#categoryList').innerHTML=data.consumptionCategories.map(c=>`<span class="chip">${esc(c)} <button onclick="delCat('${encodeURIComponent(c)}','${esc(c)}')">×</button></span>`).join('')}
-function renderCalendar(){const y=shownMonth.getFullYear(),m=shownMonth.getMonth(); const first=new Date(y,m,1); const days=new Date(y,m+1,0).getDate(); const offset=(first.getDay()+6)%7; let html=''; for(let i=0;i<offset;i++) html+='<div></div>'; for(let d=1;d<=days;d++){const date=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const es=expensesThisMonth().filter(e=>expenseDate(e.date)===date); html+=`<div class="day ${es.length?'hit':''}"><b>${d}</b>${es.map(e=>`<div>${esc(e.category)} ${euro(e.amount)}</div>`).join('')}</div>`} q('#calendar').innerHTML=html}
+function catAbbr(name){
+ const raw=String(name||'').trim();
+ const map={
+  'rechnung ausm vormonat':'RAV','rechnung aus dem vormonat':'RAV','rechnung aus vormonat':'RAV','vormonat':'VM',
+  'leihgabe':'LG','lidl':'L','aldi':'A','rewe':'R','edeka':'EDE','aral':'AR','tanken':'T','essen':'E','arbeit':'AB','freizeit':'F'
+ };
+ const key=raw.toLowerCase().replace(/\s+/g,' ');
+ if(map[key]) return map[key];
+ const words=raw.split(/\s+/).filter(Boolean);
+ if(words.length===1) return words[0].slice(0,3).toUpperCase();
+ return words.map(w=>w[0]).join('').slice(0,3).toUpperCase();
+}
+function weekdayShort(date){return ['SO','MO','DI','MI','DO','FR','SA'][date.getDay()]}
+function entriesForDay(date){return expensesThisMonth().filter(e=>parseDateInput(e.date)===date)}
+function groupedDayEntries(entries){
+ const g={};
+ for(const e of entries){
+  const c=e.category||'Sonstiges';
+  if(!g[c]) g[c]={category:c, amount:0, count:0, notes:[]};
+  g[c].amount += num(e.amount); g[c].count += 1;
+  if(e.note) g[c].notes.push(e.note);
+ }
+ return Object.values(g).sort((a,b)=>b.amount-a.amount);
+}
+function showDay(date){
+ const entries=entriesForDay(date);
+ const nice=formatDateInput(date);
+ if(!entries.length){openNotice(`${nice}\n\nKeine Konsumkosten eingetragen.`); return;}
+ const lines=entries.map(e=>`${esc(e.category).replace(/&#039;/g,"'")}: ${euro(e.amount)}${e.note?' - '+e.note:''}`).join('\n');
+ openNotice(`${nice}\n\n${lines}`);
+}
+function renderCalendar(){
+ const y=shownMonth.getFullYear(),m=shownMonth.getMonth();
+ const first=new Date(y,m,1), days=new Date(y,m+1,0).getDate(), offset=(first.getDay()+6)%7;
+ let html='';
+ for(let i=0;i<offset;i++) html+='<div class="day empty"></div>';
+ for(let d=1;d<=days;d++){
+  const date=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  const dateObj=new Date(y,m,d);
+  const entries=groupedDayEntries(entriesForDay(date));
+  const visible=entries.slice(0,3);
+  const more=entries.length-visible.length;
+  const title=entries.map(e=>`${e.category}: ${euro(e.amount)}`).join('\n');
+  html+=`<button type="button" class="day ${entries.length?'hit':''}" title="${attr(title)}" onclick="showDay('${date}')"><span class="day-head"><b>${d}</b><em>${weekdayShort(dateObj)}</em></span><span class="day-items">${visible.map(e=>`<span class="day-entry"><strong>${esc(catAbbr(e.category))}</strong> ${euro(e.amount)}</span>`).join('')}${more?`<span class="day-more">+${more} weitere</span>`:''}</span></button>`;
+ }
+ q('#calendar').innerHTML=html;
+}
 function countCat(c){return expensesThisMonth().filter(e=>e.category===c).length}
 function showCat(c){c=decodeURIComponent(c); const lines=expensesThisMonth().filter(e=>e.category===c).map(e=>`${formatDateInput(e.date)}: ${euro(e.amount)} ${e.note?'- '+e.note:''}`).join('\n'); openNotice(c+'\n\n'+lines)}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
@@ -57,6 +103,6 @@ q('#extraIncomeForm').addEventListener('submit',e=>{e.preventDefault(); api('/ap
 q('#fixedForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/cost',{method:'POST',body:JSON.stringify({type:'fixedCosts',name:q('#fixedName').value,amount:num(q('#fixedAmount').value)})}); q('#fixedName').value=''; q('#fixedAmount').value='';});
 q('#cancelForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/cost',{method:'POST',body:JSON.stringify({type:'cancelableCosts',name:q('#cancelName').value,amount:num(q('#cancelAmount').value)})}); q('#cancelName').value=''; q('#cancelAmount').value='';});
 q('#categoryForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/category',{method:'POST',body:JSON.stringify({name:q('#categoryName').value})}); q('#categoryName').value='';});
-q('#prevMonth').onclick=()=>{shownMonth=new Date(shownMonth.getFullYear(),shownMonth.getMonth()-1,1); render()}; q('#nextMonth').onclick=()=>{shownMonth=new Date(shownMonth.getFullYear(),shownMonth.getMonth()+1,1); render()}; q('#toggleCalendar').onclick=()=>q('#calendar').classList.toggle('hidden');
+q('#prevMonth').onclick=()=>{shownMonth=new Date(shownMonth.getFullYear(),shownMonth.getMonth()-1,1); render()}; q('#nextMonth').onclick=()=>{shownMonth=new Date(shownMonth.getFullYear(),shownMonth.getMonth()+1,1); render()};
 q('#modalOk').onclick=confirmModal; q('#modalCancel').onclick=closeModal;
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); load();
