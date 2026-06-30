@@ -26,3 +26,17 @@ input[type="date"]{appearance:none;-webkit-appearance:none;width:100%;min-width:
   #expenseForm label{width:100%;max-width:100%;overflow:hidden;}
   #expenseDate{height:64px;padding-left:12px;padding-right:12px;}
 }
+
+/* v5: month-specific plus income */
+.stats{grid-template-columns:repeat(4,1fr)}
+.plus-panel{margin:12px 0}
+.plus-panel h3{margin-top:0}
+.muted{color:var(--muted)}
+@media(max-width:540px){
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .stats b{font-size:20px;}
+  .plus-form{grid-template-columns:minmax(0,1fr);}
+}
+@media(min-width:760px){
+  .plus-form{grid-template-columns:1fr 160px 170px auto;}
+}

@@ -10,7 +10,8 @@ const defaultData = {
   fixedCosts: [],
   cancelableCosts: [],
   consumptionCategories: ['Lidl','Aldi','Rewe','Edeka','Aral','Tanken','Essen','Arbeit','Freizeit'],
-  expenses: []
+  expenses: [],
+  extraIncome: []
 };
 function load(){
   try { if(!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify(defaultData,null,2));
@@ -33,5 +34,7 @@ app.post('/api/category', (req,res)=> { const d=load(); const name=String(req.bo
 app.delete('/api/category/:name', (req,res)=> { const d=load(); d.consumptionCategories=d.consumptionCategories.filter(x=>x!==req.params.name); save(d); res.json(d); });
 app.post('/api/expense', (req,res)=> { const d=load(); const now=new Date(); const date=String(req.body.date||now.toISOString().slice(0,10)); d.expenses.push({id:id(), category:String(req.body.category||'Sonstiges').trim(), amount:Number(req.body.amount)||0, note:String(req.body.note||'').trim(), date}); save(d); res.json(d); });
 app.delete('/api/expense/:id', (req,res)=> { const d=load(); d.expenses=d.expenses.filter(x=>x.id!==req.params.id); save(d); res.json(d); });
+app.post('/api/extra-income', (req,res)=> { const d=load(); const now=new Date(); const date=String(req.body.date||now.toISOString().slice(0,10)); d.extraIncome.push({id:id(), name:String(req.body.name||'Plusgeld').trim(), amount:Number(req.body.amount)||0, date, note:String(req.body.note||'').trim()}); save(d); res.json(d); });
+app.delete('/api/extra-income/:id', (req,res)=> { const d=load(); d.extraIncome=d.extraIncome.filter(x=>x.id!==req.params.id); save(d); res.json(d); });
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.listen(PORT, '127.0.0.1', ()=> console.log(`Budget Master läuft intern auf http://127.0.0.1:${PORT}`));

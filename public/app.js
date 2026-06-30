@@ -7,19 +7,23 @@ function isoToday(){const d=new Date(); return `${d.getFullYear()}-${String(d.ge
 function formatDateInput(iso){const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${m[3]}.${m[2]}.${m[1]}`:String(iso||'')}
 function parseDateInput(v){v=String(v||'').trim(); let m=v.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/); if(m){return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`} m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if(m){return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`} return isoToday();}
 async function api(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt}); data=await r.json(); render();}
-async function load(){const r=await fetch('/api/data'); data=await r.json(); q('#expenseDate').value=formatDateInput(isoToday()); render();}
+async function load(){const r=await fetch('/api/data'); data=await r.json(); q('#expenseDate').value=formatDateInput(isoToday()); q('#extraDate').value=formatDateInput(isoToday()); render();}
 function sum(arr){return arr.reduce((s,x)=>s+num(x.amount),0)}
 function monthKey(d){return d.toISOString().slice(0,7)}
 function expensesThisMonth(){const k=monthKey(shownMonth); return data.expenses.filter(e=>String(e.date).slice(0,7)===k)}
+function extraThisMonth(){const k=monthKey(shownMonth); return (data.extraIncome||[]).filter(e=>String(e.date).slice(0,7)===k)}
 function grouped(){const g={}; for(const e of expensesThisMonth()){g[e.category]=(g[e.category]||0)+num(e.amount)} return Object.entries(g).sort((a,b)=>b[1]-a[1])}
 function render(){
- const fixed=sum(data.fixedCosts), cancel=sum(data.cancelableCosts), month=sum(expensesThisMonth()), running=fixed+cancel, free=data.income-running-month;
- q('#freeAmount').textContent=euro(free); q('#incomeTop').textContent=euro(data.income); q('#runningTop').textContent=euro(running); q('#monthTop').textContent=euro(month);
- q('#incomeOverview').textContent=euro(data.income); q('#fixedTotal').textContent=euro(fixed); q('#cancelTotal').textContent=euro(cancel); q('#runningTotal').textContent=euro(running);
- renderCostList('#fixedList',data.fixedCosts,'fixedCosts'); renderCostList('#cancelList',data.cancelableCosts,'cancelableCosts'); renderCostList('#monthFixed',data.fixedCosts,'fixedCosts',true); renderCostList('#monthCancel',data.cancelableCosts,'cancelableCosts',true);
+ const fixed=sum(data.fixedCosts), cancel=sum(data.cancelableCosts), month=sum(expensesThisMonth()), extra=sum(extraThisMonth()), running=fixed+cancel, totalIncome=(num(data.income)+extra), free=totalIncome-running-month;
+ q('#freeAmount').textContent=euro(free); q('#incomeTop').textContent=euro(data.income); q('#extraTop').textContent=euro(extra); q('#runningTop').textContent=euro(running); q('#monthTop').textContent=euro(month);
+ q('#incomeOverview').textContent=euro(data.income); q('#extraOverview').textContent=euro(extra); q('#totalIncomeOverview').textContent=euro(totalIncome); q('#fixedTotal').textContent=euro(fixed); q('#cancelTotal').textContent=euro(cancel); q('#runningTotal').textContent=euro(running);
+ renderCostList('#fixedList',data.fixedCosts,'fixedCosts'); renderCostList('#cancelList',data.cancelableCosts,'cancelableCosts'); renderCostList('#monthFixed',data.fixedCosts,'fixedCosts',true); renderCostList('#monthCancel',data.cancelableCosts,'cancelableCosts',true); renderExtraIncome();
  q('#expenseCategory').innerHTML=data.consumptionCategories.map(c=>`<option>${esc(c)}</option>`).join('') || '<option>Sonstiges</option>';
  q('#groupedExpenses').innerHTML=grouped().map(([c,a])=>`<div class="row"><div><b>${esc(c)}</b><small>${countCat(c)} Einträge</small></div><b>${euro(a)}</b><button onclick="showCat('${encodeURIComponent(c)}')">Details</button></div>`).join('') || '<p class="muted">Noch keine Konsumkosten in diesem Monat.</p>';
  q('#monthTitle').textContent=shownMonth.toLocaleDateString('de-DE',{month:'long',year:'numeric'}); renderCalendar(); renderCats();
+}
+function renderExtraIncome(){
+ q('#monthExtraIncome').innerHTML=extraThisMonth().map(x=>`<div class="row"><div><b>${esc(x.name)}</b><small>${new Date(x.date).toLocaleDateString('de-DE')}${x.note?' · '+esc(x.note):''}</small></div><b>${euro(x.amount)}</b><div class="actions"><button title="Löschen" onclick="delExtraIncome('${x.id}','${esc(x.name)}')">X</button></div></div>`).join('') || '<p class="muted">Kein Plusgeld für diesen Monat eingetragen.</p>';
 }
 function renderCostList(sel,arr,type,compact=false){
  q(sel).innerHTML=arr.map(x=>{
@@ -43,9 +47,11 @@ function closeModal(){q('#modal').classList.add('hidden'); q('#modalCancel').cla
 function confirmModal(){const fn=pendingConfirm; closeModal(); if(fn) fn()}
 async function delCost(type,id,name){openConfirm(`Eintrag „${name}“ wirklich löschen?`,()=>api(`/api/cost/${type}/${id}`,{method:'DELETE'}));}
 async function delCat(c,name){openConfirm(`Kategorie „${name}“ wirklich entfernen?`,()=>api(`/api/category/${decodeURIComponent(c)}`,{method:'DELETE'}));}
+async function delExtraIncome(id,name){openConfirm(`Plusgeld „${name}“ wirklich löschen?`,()=>api(`/api/extra-income/${id}`,{method:'DELETE'}));}
 qa('[data-view]').forEach(b=>b.addEventListener('click',()=>{qa('.view').forEach(v=>v.classList.remove('active')); q('#'+b.dataset.view).classList.add('active'); window.scrollTo({top:0,behavior:'smooth'});}));
 q('#expenseForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/expense',{method:'POST',body:JSON.stringify({category:q('#expenseCategory').value,amount:num(q('#expenseAmount').value),date:parseDateInput(q('#expenseDate').value),note:q('#expenseNote').value})}); q('#expenseAmount').value=''; q('#expenseNote').value='';});
 q('#incomeForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/income',{method:'POST',body:JSON.stringify({income:num(q('#incomeInput').value)})});});
+q('#extraIncomeForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/extra-income',{method:'POST',body:JSON.stringify({name:q('#extraName').value,amount:num(q('#extraAmount').value),date:parseDateInput(q('#extraDate').value)})}); q('#extraName').value=''; q('#extraAmount').value=''; q('#extraDate').value=formatDateInput(isoToday());});
 q('#fixedForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/cost',{method:'POST',body:JSON.stringify({type:'fixedCosts',name:q('#fixedName').value,amount:num(q('#fixedAmount').value)})}); q('#fixedName').value=''; q('#fixedAmount').value='';});
 q('#cancelForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/cost',{method:'POST',body:JSON.stringify({type:'cancelableCosts',name:q('#cancelName').value,amount:num(q('#cancelAmount').value)})}); q('#cancelName').value=''; q('#cancelAmount').value='';});
 q('#categoryForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/category',{method:'POST',body:JSON.stringify({name:q('#categoryName').value})}); q('#categoryName').value='';});
