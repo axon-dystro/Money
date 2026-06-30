@@ -3,8 +3,11 @@ const euro=n=>(Number(n)||0).toLocaleString('de-DE',{style:'currency',currency:'
 const num=v=>Number(String(v||'').replace(',','.'))||0;
 const q=s=>document.querySelector(s);
 const qa=s=>Array.from(document.querySelectorAll(s));
+function isoToday(){const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function formatDateInput(iso){const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${m[3]}.${m[2]}.${m[1]}`:String(iso||'')}
+function parseDateInput(v){v=String(v||'').trim(); let m=v.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/); if(m){return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`} m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if(m){return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`} return isoToday();}
 async function api(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt}); data=await r.json(); render();}
-async function load(){const r=await fetch('/api/data'); data=await r.json(); q('#expenseDate').value=new Date().toISOString().slice(0,10); render();}
+async function load(){const r=await fetch('/api/data'); data=await r.json(); q('#expenseDate').value=formatDateInput(isoToday()); render();}
 function sum(arr){return arr.reduce((s,x)=>s+num(x.amount),0)}
 function monthKey(d){return d.toISOString().slice(0,7)}
 function expensesThisMonth(){const k=monthKey(shownMonth); return data.expenses.filter(e=>String(e.date).slice(0,7)===k)}
@@ -41,7 +44,7 @@ function confirmModal(){const fn=pendingConfirm; closeModal(); if(fn) fn()}
 async function delCost(type,id,name){openConfirm(`Eintrag „${name}“ wirklich löschen?`,()=>api(`/api/cost/${type}/${id}`,{method:'DELETE'}));}
 async function delCat(c,name){openConfirm(`Kategorie „${name}“ wirklich entfernen?`,()=>api(`/api/category/${decodeURIComponent(c)}`,{method:'DELETE'}));}
 qa('[data-view]').forEach(b=>b.addEventListener('click',()=>{qa('.view').forEach(v=>v.classList.remove('active')); q('#'+b.dataset.view).classList.add('active'); window.scrollTo({top:0,behavior:'smooth'});}));
-q('#expenseForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/expense',{method:'POST',body:JSON.stringify({category:q('#expenseCategory').value,amount:num(q('#expenseAmount').value),date:q('#expenseDate').value,note:q('#expenseNote').value})}); q('#expenseAmount').value=''; q('#expenseNote').value='';});
+q('#expenseForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/expense',{method:'POST',body:JSON.stringify({category:q('#expenseCategory').value,amount:num(q('#expenseAmount').value),date:parseDateInput(q('#expenseDate').value),note:q('#expenseNote').value})}); q('#expenseAmount').value=''; q('#expenseNote').value='';});
 q('#incomeForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/income',{method:'POST',body:JSON.stringify({income:num(q('#incomeInput').value)})});});
 q('#fixedForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/cost',{method:'POST',body:JSON.stringify({type:'fixedCosts',name:q('#fixedName').value,amount:num(q('#fixedAmount').value)})}); q('#fixedName').value=''; q('#fixedAmount').value='';});
 q('#cancelForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/cost',{method:'POST',body:JSON.stringify({type:'cancelableCosts',name:q('#cancelName').value,amount:num(q('#cancelAmount').value)})}); q('#cancelName').value=''; q('#cancelAmount').value='';});
