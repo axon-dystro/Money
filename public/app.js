@@ -1,26 +1,31 @@
-let data=null; let shownMonth=new Date(); shownMonth=new Date(shownMonth.getFullYear(), shownMonth.getMonth(), 1); let editCost=null; let pendingConfirm=null;
+let data=null; let shownMonth=new Date(); let editCost=null; let pendingConfirm=null;
 const euro=n=>(Number(n)||0).toLocaleString('de-DE',{style:'currency',currency:'EUR'});
 const num=v=>Number(String(v||'').replace(',','.'))||0;
 const q=s=>document.querySelector(s);
 const qa=s=>Array.from(document.querySelectorAll(s));
 function isoToday(){const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function localMonthKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`}
 function formatDateInput(iso){const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${m[3]}.${m[2]}.${m[1]}`:String(iso||'')}
 function parseDateInput(v){v=String(v||'').trim(); let m=v.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/); if(m){return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`} m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if(m){return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`} return isoToday();}
 async function api(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt}); data=await r.json(); render();}
 async function load(){const r=await fetch('/api/data'); data=await r.json(); q('#expenseDate').value=formatDateInput(isoToday()); q('#extraDate').value=formatDateInput(isoToday()); render();}
 function sum(arr){return arr.reduce((s,x)=>s+num(x.amount),0)}
-function monthKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`} // local month, not UTC/ISO; fixes iPhone/Germany month shifting
+function monthKey(d){return localMonthKey(d)}
 function dateKey(v){return parseDateInput(v).slice(0,7)}
-function expenseDate(v){return parseDateInput(v)}
 function expensesThisMonth(){const k=monthKey(shownMonth); return data.expenses.filter(e=>dateKey(e.date)===k)}
 function extraThisMonth(){const k=monthKey(shownMonth); return (data.extraIncome||[]).filter(e=>dateKey(e.date)===k)}
 function grouped(){const g={}; for(const e of expensesThisMonth()){g[e.category]=(g[e.category]||0)+num(e.amount)} return Object.entries(g).sort((a,b)=>b[1]-a[1])}
+function categoryOptions(selected){
+ const cats=(data.consumptionCategories&&data.consumptionCategories.length?data.consumptionCategories:['Sonstiges']);
+ if(selected && !cats.includes(selected)) cats.push(selected);
+ return cats.map(c=>`<option value="${attr(c)}" ${c===selected?'selected':''}>${esc(c)}</option>`).join('');
+}
 function render(){
  const fixed=sum(data.fixedCosts), cancel=sum(data.cancelableCosts), month=sum(expensesThisMonth()), extra=sum(extraThisMonth()), running=fixed+cancel, totalIncome=(num(data.income)+extra), free=totalIncome-running-month;
  q('#freeAmount').textContent=euro(free); q('#incomeTop').textContent=euro(data.income); q('#extraTop').textContent=euro(extra); q('#runningTop').textContent=euro(running); q('#monthTop').textContent=euro(month);
  q('#incomeOverview').textContent=euro(data.income); q('#extraOverview').textContent=euro(extra); q('#totalIncomeOverview').textContent=euro(totalIncome); q('#fixedTotal').textContent=euro(fixed); q('#cancelTotal').textContent=euro(cancel); q('#runningTotal').textContent=euro(running);
- renderCostList('#fixedList',data.fixedCosts,'fixedCosts'); renderCostList('#cancelList',data.cancelableCosts,'cancelableCosts'); renderCostList('#monthFixed',data.fixedCosts,'fixedCosts',true); renderCostList('#monthCancel',data.cancelableCosts,'cancelableCosts',true); renderExtraIncome();
- q('#expenseCategory').innerHTML=data.consumptionCategories.map(c=>`<option>${esc(c)}</option>`).join('') || '<option>Sonstiges</option>';
+ renderCostList('#fixedList',data.fixedCosts,'fixedCosts'); renderCostList('#cancelList',data.cancelableCosts,'cancelableCosts'); renderCostList('#monthFixed',data.fixedCosts,'fixedCosts',true); renderCostList('#monthCancel',data.cancelableCosts,'cancelableCosts',true); renderExtraIncome(); renderExpenseList('#monthExpenses', expensesThisMonth());
+ q('#expenseCategory').innerHTML=categoryOptions(q('#expenseCategory').value);
  q('#groupedExpenses').innerHTML=grouped().map(([c,a])=>`<div class="row"><div><b>${esc(c)}</b><small>${countCat(c)} Einträge</small></div><b>${euro(a)}</b><button onclick="showCat('${encodeURIComponent(c)}')">Details</button></div>`).join('') || '<p class="muted">Noch keine Konsumkosten in diesem Monat.</p>';
  q('#monthTitle').textContent=shownMonth.toLocaleDateString('de-DE',{month:'long',year:'numeric'}); renderCalendar(); renderCats();
 }
@@ -33,6 +38,10 @@ function renderCostList(sel,arr,type,compact=false){
    if(isEdit){return `<form class="row edit-row" onsubmit="saveCostEdit(event,'${type}','${x.id}')"><input name="name" value="${attr(x.name)}"><input name="amount" inputmode="decimal" value="${attr(String(x.amount).replace('.',','))}"><button type="submit">Speichern</button><button type="button" onclick="cancelCostEdit()">Abbrechen</button></form>`}
    return `<div class="row"><div><b>${esc(x.name)}</b></div><b>${euro(x.amount)}</b>${compact?'':`<div class="actions"><button title="Bearbeiten" onclick="startCostEdit('${type}','${x.id}')">✎</button><button title="Löschen" onclick="delCost('${type}','${x.id}','${esc(x.name)}')">X</button></div>`}</div>`
  }).join('') || '<p class="muted">Noch nichts eingetragen.</p>'
+}
+function renderExpenseList(sel,arr){
+ const sorted=[...arr].sort((a,b)=>parseDateInput(a.date).localeCompare(parseDateInput(b.date)) || String(a.category).localeCompare(String(b.category),'de'));
+ q(sel).innerHTML=sorted.map(x=>`<div class="row expense-row"><div><b>${esc(x.category)}</b><small>${formatDateInput(x.date)}${x.note?' · '+esc(x.note):''}</small></div><b>${euro(x.amount)}</b><div class="actions"><button title="Bearbeiten" onclick="openExpenseEdit('${x.id}')">✎</button><button title="Löschen" onclick="delExpense('${x.id}','${esc(x.category)}')">X</button></div></div>`).join('') || '<p class="muted">Noch keine Konsumkosten in diesem Monat eingetragen.</p>';
 }
 function startCostEdit(type,id){editCost={type,id}; render();}
 function cancelCostEdit(){editCost=null; render();}
@@ -66,8 +75,8 @@ function showDay(date){
  const entries=entriesForDay(date);
  const nice=formatDateInput(date);
  if(!entries.length){openNotice(`${nice}\n\nKeine Konsumkosten eingetragen.`); return;}
- const lines=entries.map(e=>`${esc(e.category).replace(/&#039;/g,"'")}: ${euro(e.amount)}${e.note?' - '+e.note:''}`).join('\n');
- openNotice(`${nice}\n\n${lines}`);
+ const rows=entries.map(e=>`<div class="row expense-row"><div><b>${esc(e.category)}</b><small>${formatDateInput(e.date)}${e.note?' · '+esc(e.note):''}</small></div><b>${euro(e.amount)}</b><div class="actions"><button title="Bearbeiten" onclick="openExpenseEdit('${e.id}')">✎</button><button title="Löschen" onclick="delExpense('${e.id}','${esc(e.category)}')">X</button></div></div>`).join('');
+ openHtmlModal(`<h3>${nice}</h3><div class="list modal-list">${rows}</div>`, false);
 }
 function renderCalendar(){
  const y=shownMonth.getFullYear(),m=shownMonth.getMonth();
@@ -86,16 +95,34 @@ function renderCalendar(){
  q('#calendar').innerHTML=html;
 }
 function countCat(c){return expensesThisMonth().filter(e=>e.category===c).length}
-function showCat(c){c=decodeURIComponent(c); const lines=expensesThisMonth().filter(e=>e.category===c).map(e=>`${formatDateInput(e.date)}: ${euro(e.amount)} ${e.note?'- '+e.note:''}`).join('\n'); openNotice(c+'\n\n'+lines)}
+function showCat(c){
+ c=decodeURIComponent(c);
+ const entries=expensesThisMonth().filter(e=>e.category===c);
+ const rows=entries.map(e=>`<div class="row expense-row"><div><b>${esc(e.category)}</b><small>${formatDateInput(e.date)}${e.note?' · '+esc(e.note):''}</small></div><b>${euro(e.amount)}</b><div class="actions"><button title="Bearbeiten" onclick="openExpenseEdit('${e.id}')">✎</button><button title="Löschen" onclick="delExpense('${e.id}','${esc(e.category)}')">X</button></div></div>`).join('');
+ openHtmlModal(`<h3>${esc(c)}</h3><div class="list modal-list">${rows || '<p class="muted">Keine Einträge.</p>'}</div>`, false);
+}
+function openExpenseEdit(id){
+ const e=(data.expenses||[]).find(x=>x.id===id);
+ if(!e){openNotice('Eintrag nicht gefunden.'); return;}
+ openHtmlModal(`<h3>Konsumkosten bearbeiten</h3><form class="expense-edit-form" onsubmit="saveExpenseEdit(event,'${e.id}')"><label>Kategorie<select name="category">${categoryOptions(e.category)}</select></label><label>Betrag<input name="amount" inputmode="decimal" value="${attr(String(e.amount).replace('.',','))}"></label><label>Datum<input name="date" inputmode="numeric" value="${attr(formatDateInput(e.date))}"></label><label>Notiz<input name="note" value="${attr(e.note||'')}"></label><button class="primary" type="submit">Speichern</button><button type="button" onclick="closeModal()">Abbrechen</button></form>`, true);
+}
+async function saveExpenseEdit(ev,id){
+ ev.preventDefault();
+ const fd=new FormData(ev.target);
+ await api(`/api/expense/${id}`,{method:'PATCH',body:JSON.stringify({category:fd.get('category'),amount:num(fd.get('amount')),date:parseDateInput(fd.get('date')),note:fd.get('note')})});
+ closeModal();
+}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function attr(s){return esc(s)}
-function openConfirm(text,onOk){pendingConfirm=onOk; q('#modalText').textContent=text; q('#modal').classList.remove('hidden')}
+function openConfirm(text,onOk){pendingConfirm=onOk; q('#modalText').textContent=text; q('#modal').classList.remove('hidden'); q('#modalCancel').classList.remove('hidden')}
 function openNotice(text){pendingConfirm=null; q('#modalText').textContent=text; q('#modal').classList.remove('hidden'); q('#modalCancel').classList.add('hidden')}
-function closeModal(){q('#modal').classList.add('hidden'); q('#modalCancel').classList.remove('hidden'); pendingConfirm=null}
+function openHtmlModal(html, hideCancel=true){pendingConfirm=null; q('#modalText').innerHTML=html; q('#modal').classList.remove('hidden'); q('#modalCancel').classList.toggle('hidden', hideCancel)}
+function closeModal(){q('#modal').classList.add('hidden'); q('#modalCancel').classList.remove('hidden'); q('#modalText').textContent=''; pendingConfirm=null}
 function confirmModal(){const fn=pendingConfirm; closeModal(); if(fn) fn()}
 async function delCost(type,id,name){openConfirm(`Eintrag „${name}“ wirklich löschen?`,()=>api(`/api/cost/${type}/${id}`,{method:'DELETE'}));}
 async function delCat(c,name){openConfirm(`Kategorie „${name}“ wirklich entfernen?`,()=>api(`/api/category/${decodeURIComponent(c)}`,{method:'DELETE'}));}
 async function delExtraIncome(id,name){openConfirm(`Plusgeld „${name}“ wirklich löschen?`,()=>api(`/api/extra-income/${id}`,{method:'DELETE'}));}
+async function delExpense(id,name){openConfirm(`Konsumkosten „${name}“ wirklich löschen?`,()=>api(`/api/expense/${id}`,{method:'DELETE'}));}
 qa('[data-view]').forEach(b=>b.addEventListener('click',()=>{qa('.view').forEach(v=>v.classList.remove('active')); q('#'+b.dataset.view).classList.add('active'); window.scrollTo({top:0,behavior:'smooth'});}));
 q('#expenseForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/expense',{method:'POST',body:JSON.stringify({category:q('#expenseCategory').value,amount:num(q('#expenseAmount').value),date:parseDateInput(q('#expenseDate').value),note:q('#expenseNote').value})}); q('#expenseAmount').value=''; q('#expenseNote').value='';});
 q('#incomeForm').addEventListener('submit',e=>{e.preventDefault(); api('/api/income',{method:'POST',body:JSON.stringify({income:num(q('#incomeInput').value)})});});

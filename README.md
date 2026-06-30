@@ -47,8 +47,10 @@ Danach iPhone Safari öffnen → Teilen → Zum Home-Bildschirm.
 - Tag oben links und Wochentag oben rechts sauber in den Ecken.
 - Einträge bleiben mittig/sauber im Kalenderfeld.
 
-
-## v9 Fix
-- Monatsfilter nutzt lokale Zeit statt UTC/toISOString.
-- Dadurch rutschen Einträge vom 01.07. nicht mehr in August/Juni.
-- Cache-Version auf v9 erhöht.
+## v10 Änderungen
+- Monatsübersicht hat jetzt einen zugeklappten Bereich „Konsumkosten anzeigen/bearbeiten“.
+- Konsumkosten können gelöscht und über ✎ bearbeitet werden.
+- Beim Klick auf einen Kalendertag öffnet sich ein internes Popup mit allen Einträgen dieses Tages.
+- Im Tages-Popup können Einträge ebenfalls gelöscht oder bearbeitet werden.
+- Beim Bearbeiten sind Kategorie-Dropdown, Betrag, Datum und Notiz änderbar.
+- Neuer Server-Endpunkt: `PATCH /api/expense/:id`.

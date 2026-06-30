@@ -145,3 +145,21 @@ button.day{cursor:pointer}
   .day-entry{font-size:9px;line-height:1.15;margin-bottom:2px;}
   .day-more{font-size:8px;}
 }
+
+/* v10: editable consumption-cost lists and day popup */
+.expense-row small{display:block;margin-top:3px;color:var(--muted);font-size:12px;font-weight:700;line-height:1.2}
+.modal-box{width:min(720px,100%)}
+.modal-list{margin-top:12px;max-height:58vh;overflow:auto;padding-right:2px}
+.expense-edit-form{display:grid;gap:12px;margin-top:10px}
+.expense-edit-form label{font-weight:900;color:var(--muted)}
+.expense-edit-form select,.expense-edit-form input{margin-top:6px;width:100%}
+.expense-edit-form button{width:100%}
+@media(min-width:760px){
+  .expense-edit-form{grid-template-columns:1fr 160px 150px 1fr;align-items:end}
+  .expense-edit-form button{grid-column:auto}
+}
+@media(max-width:540px){
+  .modal-box{max-height:86vh;overflow:auto}
+  .modal-list{max-height:58vh}
+  .expense-row .actions{grid-column:1 / -1;display:grid;grid-template-columns:1fr 1fr}
+}

@@ -42,6 +42,17 @@ app.delete('/api/cost/:type/:id', (req,res)=> { const d=load(); const type=req.p
 app.post('/api/category', (req,res)=> { const d=load(); const name=String(req.body.name||'').trim(); if(name && !d.consumptionCategories.includes(name)) d.consumptionCategories.push(name); d.consumptionCategories.sort((a,b)=>a.localeCompare(b,'de')); save(d); res.json(d); });
 app.delete('/api/category/:name', (req,res)=> { const d=load(); d.consumptionCategories=d.consumptionCategories.filter(x=>x!==req.params.name); save(d); res.json(d); });
 app.post('/api/expense', (req,res)=> { const d=load(); const now=new Date(); const date=normalizeDate(req.body.date||now.toISOString().slice(0,10)); d.expenses.push({id:id(), category:String(req.body.category||'Sonstiges').trim(), amount:Number(req.body.amount)||0, note:String(req.body.note||'').trim(), date}); save(d); res.json(d); });
+
+app.patch('/api/expense/:id', (req,res)=> {
+  const d=load();
+  const item=d.expenses.find(x=>x.id===req.params.id);
+  if(!item) return res.status(404).json({error:'not found'});
+  item.category=String(req.body.category||item.category||'Sonstiges').trim();
+  item.amount=Number(req.body.amount)||0;
+  item.note=String(req.body.note||'').trim();
+  item.date=normalizeDate(req.body.date||item.date);
+  save(d); res.json(d);
+});
 app.delete('/api/expense/:id', (req,res)=> { const d=load(); d.expenses=d.expenses.filter(x=>x.id!==req.params.id); save(d); res.json(d); });
 app.post('/api/extra-income', (req,res)=> { const d=load(); const now=new Date(); const date=normalizeDate(req.body.date||now.toISOString().slice(0,10)); d.extraIncome.push({id:id(), name:String(req.body.name||'Plusgeld').trim(), amount:Number(req.body.amount)||0, date, note:String(req.body.note||'').trim()}); save(d); res.json(d); });
 app.delete('/api/extra-income/:id', (req,res)=> { const d=load(); d.extraIncome=d.extraIncome.filter(x=>x.id!==req.params.id); save(d); res.json(d); });
