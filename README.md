@@ -34,3 +34,9 @@ server {
 ```
 
 Danach iPhone Safari öffnen → Teilen → Zum Home-Bildschirm.
+
+
+## v6 Fix
+- Server normalisiert Datumswerte jetzt auch dann, wenn Safari/Textfelder TT.MM.JJJJ schicken.
+- Plusgeld wird auch erkannt, wenn alte Daten im Format TT.MM.JJJJ gespeichert wurden.
+- Service Worker auf Network-First geändert, damit Safari/PWA weniger alte Dateien cached.

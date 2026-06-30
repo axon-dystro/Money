@@ -10,8 +10,10 @@ async function api(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':
 async function load(){const r=await fetch('/api/data'); data=await r.json(); q('#expenseDate').value=formatDateInput(isoToday()); q('#extraDate').value=formatDateInput(isoToday()); render();}
 function sum(arr){return arr.reduce((s,x)=>s+num(x.amount),0)}
 function monthKey(d){return d.toISOString().slice(0,7)}
-function expensesThisMonth(){const k=monthKey(shownMonth); return data.expenses.filter(e=>String(e.date).slice(0,7)===k)}
-function extraThisMonth(){const k=monthKey(shownMonth); return (data.extraIncome||[]).filter(e=>String(e.date).slice(0,7)===k)}
+function dateKey(v){return parseDateInput(v).slice(0,7)}
+function expenseDate(v){return parseDateInput(v)}
+function expensesThisMonth(){const k=monthKey(shownMonth); return data.expenses.filter(e=>dateKey(e.date)===k)}
+function extraThisMonth(){const k=monthKey(shownMonth); return (data.extraIncome||[]).filter(e=>dateKey(e.date)===k)}
 function grouped(){const g={}; for(const e of expensesThisMonth()){g[e.category]=(g[e.category]||0)+num(e.amount)} return Object.entries(g).sort((a,b)=>b[1]-a[1])}
 function render(){
  const fixed=sum(data.fixedCosts), cancel=sum(data.cancelableCosts), month=sum(expensesThisMonth()), extra=sum(extraThisMonth()), running=fixed+cancel, totalIncome=(num(data.income)+extra), free=totalIncome-running-month;
@@ -23,7 +25,7 @@ function render(){
  q('#monthTitle').textContent=shownMonth.toLocaleDateString('de-DE',{month:'long',year:'numeric'}); renderCalendar(); renderCats();
 }
 function renderExtraIncome(){
- q('#monthExtraIncome').innerHTML=extraThisMonth().map(x=>`<div class="row"><div><b>${esc(x.name)}</b><small>${new Date(x.date).toLocaleDateString('de-DE')}${x.note?' · '+esc(x.note):''}</small></div><b>${euro(x.amount)}</b><div class="actions"><button title="Löschen" onclick="delExtraIncome('${x.id}','${esc(x.name)}')">X</button></div></div>`).join('') || '<p class="muted">Kein Plusgeld für diesen Monat eingetragen.</p>';
+ q('#monthExtraIncome').innerHTML=extraThisMonth().map(x=>`<div class="row"><div><b>${esc(x.name)}</b><small>${formatDateInput(x.date)}${x.note?' · '+esc(x.note):''}</small></div><b>${euro(x.amount)}</b><div class="actions"><button title="Löschen" onclick="delExtraIncome('${x.id}','${esc(x.name)}')">X</button></div></div>`).join('') || '<p class="muted">Kein Plusgeld für diesen Monat eingetragen.</p>';
 }
 function renderCostList(sel,arr,type,compact=false){
  q(sel).innerHTML=arr.map(x=>{
@@ -36,9 +38,9 @@ function startCostEdit(type,id){editCost={type,id}; render();}
 function cancelCostEdit(){editCost=null; render();}
 async function saveCostEdit(e,type,id){e.preventDefault(); const fd=new FormData(e.target); editCost=null; await api(`/api/cost/${type}/${id}`,{method:'PATCH',body:JSON.stringify({name:fd.get('name'),amount:num(fd.get('amount'))})});}
 function renderCats(){q('#categoryList').innerHTML=data.consumptionCategories.map(c=>`<span class="chip">${esc(c)} <button onclick="delCat('${encodeURIComponent(c)}','${esc(c)}')">×</button></span>`).join('')}
-function renderCalendar(){const y=shownMonth.getFullYear(),m=shownMonth.getMonth(); const first=new Date(y,m,1); const days=new Date(y,m+1,0).getDate(); const offset=(first.getDay()+6)%7; let html=''; for(let i=0;i<offset;i++) html+='<div></div>'; for(let d=1;d<=days;d++){const date=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const es=expensesThisMonth().filter(e=>e.date===date); html+=`<div class="day ${es.length?'hit':''}"><b>${d}</b>${es.map(e=>`<div>${esc(e.category)} ${euro(e.amount)}</div>`).join('')}</div>`} q('#calendar').innerHTML=html}
+function renderCalendar(){const y=shownMonth.getFullYear(),m=shownMonth.getMonth(); const first=new Date(y,m,1); const days=new Date(y,m+1,0).getDate(); const offset=(first.getDay()+6)%7; let html=''; for(let i=0;i<offset;i++) html+='<div></div>'; for(let d=1;d<=days;d++){const date=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const es=expensesThisMonth().filter(e=>expenseDate(e.date)===date); html+=`<div class="day ${es.length?'hit':''}"><b>${d}</b>${es.map(e=>`<div>${esc(e.category)} ${euro(e.amount)}</div>`).join('')}</div>`} q('#calendar').innerHTML=html}
 function countCat(c){return expensesThisMonth().filter(e=>e.category===c).length}
-function showCat(c){c=decodeURIComponent(c); const lines=expensesThisMonth().filter(e=>e.category===c).map(e=>`${new Date(e.date).toLocaleDateString('de-DE')}: ${euro(e.amount)} ${e.note?'- '+e.note:''}`).join('\n'); openNotice(c+'\n\n'+lines)}
+function showCat(c){c=decodeURIComponent(c); const lines=expensesThisMonth().filter(e=>e.category===c).map(e=>`${formatDateInput(e.date)}: ${euro(e.amount)} ${e.note?'- '+e.note:''}`).join('\n'); openNotice(c+'\n\n'+lines)}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function attr(s){return esc(s)}
 function openConfirm(text,onOk){pendingConfirm=onOk; q('#modalText').textContent=text; q('#modal').classList.remove('hidden')}

@@ -1,3 +1,7 @@
-const CACHE='budget-master-v1';
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/','/style.css','/app.js','/manifest.json','/icon.svg']))));
-self.addEventListener('fetch',e=>{ if(e.request.url.includes('/api/')) return; e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))); });
+const CACHE='budget-master-v6';
+self.addEventListener('install',e=>{self.skipWaiting();});
+self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.map(k=>k!==CACHE?caches.delete(k):null))).then(()=>self.clients.claim())));
+self.addEventListener('fetch',e=>{
+  if(e.request.url.includes('/api/')) return;
+  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+});
