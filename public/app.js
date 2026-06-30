@@ -1,4 +1,4 @@
-let data=null; let shownMonth=new Date(); let editCost=null; let pendingConfirm=null;
+let data=null; let shownMonth=new Date(); shownMonth=new Date(shownMonth.getFullYear(), shownMonth.getMonth(), 1); let editCost=null; let pendingConfirm=null;
 const euro=n=>(Number(n)||0).toLocaleString('de-DE',{style:'currency',currency:'EUR'});
 const num=v=>Number(String(v||'').replace(',','.'))||0;
 const q=s=>document.querySelector(s);
@@ -9,7 +9,7 @@ function parseDateInput(v){v=String(v||'').trim(); let m=v.match(/^(\d{1,2})[.\-
 async function api(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opt}); data=await r.json(); render();}
 async function load(){const r=await fetch('/api/data'); data=await r.json(); q('#expenseDate').value=formatDateInput(isoToday()); q('#extraDate').value=formatDateInput(isoToday()); render();}
 function sum(arr){return arr.reduce((s,x)=>s+num(x.amount),0)}
-function monthKey(d){return d.toISOString().slice(0,7)}
+function monthKey(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`} // local month, not UTC/ISO; fixes iPhone/Germany month shifting
 function dateKey(v){return parseDateInput(v).slice(0,7)}
 function expenseDate(v){return parseDateInput(v)}
 function expensesThisMonth(){const k=monthKey(shownMonth); return data.expenses.filter(e=>dateKey(e.date)===k)}

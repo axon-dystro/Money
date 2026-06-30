@@ -46,3 +46,9 @@ Danach iPhone Safari öffnen → Teilen → Zum Home-Bildschirm.
 - Kalenderzellen wieder quadratischer.
 - Tag oben links und Wochentag oben rechts sauber in den Ecken.
 - Einträge bleiben mittig/sauber im Kalenderfeld.
+
+
+## v9 Fix
+- Monatsfilter nutzt lokale Zeit statt UTC/toISOString.
+- Dadurch rutschen Einträge vom 01.07. nicht mehr in August/Juni.
+- Cache-Version auf v9 erhöht.
