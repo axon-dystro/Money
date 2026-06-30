@@ -1,0 +1,146 @@
+{
+  "income": 1680,
+  "fixedCosts": [
+    {
+      "id": "mr144ejyqglk6f",
+      "name": "Strom",
+      "amount": 100
+    },
+    {
+      "id": "mr144ilsp0ejx7",
+      "name": "Gas",
+      "amount": 60
+    },
+    {
+      "id": "mr144pbzrnfy7c",
+      "name": "Miete",
+      "amount": 635
+    },
+    {
+      "id": "mr144zm32rfjfs",
+      "name": "Handy Internet",
+      "amount": 70
+    },
+    {
+      "id": "mr1459j5ob4b4q",
+      "name": "Iphone Schulden",
+      "amount": 50
+    },
+    {
+      "id": "mr145qzcmlw242",
+      "name": "Umfallversicherung (Ergo)",
+      "amount": 50
+    },
+    {
+      "id": "mr1460hjesmohx",
+      "name": "Hasuratversicherung (Ergo)",
+      "amount": 25
+    },
+    {
+      "id": "mr146asjtrrcnh",
+      "name": "Rechtsschutzversicherung (Ergo)",
+      "amount": 50
+    },
+    {
+      "id": "mr146khksjsev5",
+      "name": "Privatversicherung (Ergo)",
+      "amount": 20
+    },
+    {
+      "id": "mr146psygx8tz9",
+      "name": "Schufa",
+      "amount": 7
+    }
+  ],
+  "cancelableCosts": [
+    {
+      "id": "mr146yt28xgb3c",
+      "name": "Emty Führerschein",
+      "amount": 50
+    },
+    {
+      "id": "mr14747grdz4k7",
+      "name": "Cleverfit",
+      "amount": 25
+    },
+    {
+      "id": "mr147azgcuphgz",
+      "name": "ChatGPT",
+      "amount": 25
+    },
+    {
+      "id": "mr147lkjnqhmjk",
+      "name": "ChrunchyRole",
+      "amount": 10
+    },
+    {
+      "id": "mr147oxvjdyzj4",
+      "name": "Gmail",
+      "amount": 2
+    },
+    {
+      "id": "mr147uknailtlf",
+      "name": "Discord Nitro",
+      "amount": 10
+    }
+  ],
+  "consumptionCategories": [
+    "Essen",
+    "Leihgarbe",
+    "Rechnung aus Vormonat",
+    "Tanken"
+  ],
+  "expenses": [
+    {
+      "id": "mr14anwn3gawmt",
+      "category": "Rechnung aus Vormonat",
+      "amount": 130,
+      "note": "PayPal",
+      "date": "2026-07-01"
+    },
+    {
+      "id": "mr14au2fuebeuk",
+      "category": "Rechnung aus Vormonat",
+      "amount": 150,
+      "note": "Tennis",
+      "date": "2026-07-01"
+    },
+    {
+      "id": "mr14b111ikv9ds",
+      "category": "Rechnung aus Vormonat",
+      "amount": 196,
+      "note": "Amazon",
+      "date": "2026-07-01"
+    },
+    {
+      "id": "mr14b5df1jxs68",
+      "category": "Rechnung aus Vormonat",
+      "amount": 80,
+      "note": "Ergo",
+      "date": "2026-07-01"
+    },
+    {
+      "id": "mr14btmy1t3bgx",
+      "category": "Leihgarbe",
+      "amount": 50,
+      "note": "ARnd",
+      "date": "2026-07-01"
+    }
+  ],
+  "extraIncome": [
+    {
+      "id": "mr14cbdb2g8a6r",
+      "name": "UrlaubsGeld",
+      "amount": 300,
+      "date": "2026-07-01",
+      "note": ""
+    },
+    {
+      "id": "mr14dezaq5u7rh",
+      "name": "Vormonat Überschuss",
+      "amount": 174,
+      "date": "2026-07-01",
+      "note": ""
+    }
+  ]
+}
