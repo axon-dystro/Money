@@ -230,6 +230,16 @@ app.post('/api/extra-income', (req, res) => {
   d.extraIncome.push({ id: id(), name: cleanText(req.body.name, 'Plusgeld'), amount: safeNumber(req.body.amount, 0), date: normalizeDate(req.body.date), note: cleanText(req.body.note, '') });
   save(d); res.json(d);
 });
+app.patch('/api/extra-income/:id', (req, res) => {
+  const d = load();
+  const item = d.extraIncome.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: 'not found' });
+  item.name = cleanText(req.body.name, item.name);
+  item.amount = safeNumber(req.body.amount, item.amount);
+  item.date = normalizeDate(req.body.date || item.date);
+  item.note = cleanText(req.body.note, item.note || '');
+  save(d); res.json(d);
+});
 app.delete('/api/extra-income/:id', (req, res) => { const d = load(); d.extraIncome = d.extraIncome.filter(x => x.id !== req.params.id); save(d); res.json(d); });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

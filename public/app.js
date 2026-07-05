@@ -161,12 +161,13 @@ function renderBuckets() {
     const isFree = b.system === 'free_use' || b.id === 'bucket_frei';
     const deleteDisabled = isFree ? 'disabled title="Freie Verwendung kann nicht gelöscht werden"' : '';
     const stateButton = isFree
-      ? '<button type="button" disabled>Standard</button>'
-      : `<button type="button" onclick="toggleBucket('${b.id}',${b.active !== false ? 'false' : 'true'})">${b.active !== false ? 'Pause' : 'Aktiv'}</button>`;
-    return `<div class="row">
+      ? '<button class="state-btn" type="button" disabled>Standard</button>'
+      : `<button class="state-btn" type="button" onclick="toggleBucket('${b.id}',${b.active !== false ? 'false' : 'true'})">${b.active !== false ? 'Pause' : 'Aktiv'}</button>`;
+    return `<div class="row settings-row">
       <div><b>${esc(b.name)}</b><small>${b.active === false ? 'inaktiv · ' : ''}${details} · ${b.periods || 4} Abschnitt(e)</small></div>
       ${stateButton}
-      <button class="delete-btn" type="button" ${deleteDisabled} onclick="delBucket('${b.id}','${attr(b.name)}')">×</button>
+      <button class="edit-btn" type="button" onclick="editBucket('${b.id}')" aria-label="Budget-Topf bearbeiten">✎</button>
+      <button class="delete-btn" type="button" ${deleteDisabled} onclick="delBucket('${b.id}','${attr(b.name)}')" aria-label="Budget-Topf löschen">×</button>
     </div>`;
   }).join('');
 }
@@ -184,15 +185,15 @@ function renderLists() {
   q('#recentList').innerHTML = latest.map(expenseRow).join('') || '<p class="empty-note">Noch keine Buchungen in diesem Monat.</p>';
   q('#fixedList').innerHTML = costRows(data.fixedCosts || [], 'fixedCosts');
   q('#cancelList').innerHTML = costRows(data.cancelableCosts || [], 'cancelableCosts');
-  q('#monthExtraIncome').innerHTML = monthExtra().map(x => `<div class="row"><div><b>${esc(x.name)}</b><small>${formatDateInput(x.date)}</small></div><b>${euro(x.amount)}</b><button class="delete-btn" type="button" onclick="delExtraIncome('${x.id}')">×</button></div>`).join('') || '<p class="empty-note">Kein Plusgeld in diesem Monat.</p>';
+  q('#monthExtraIncome').innerHTML = monthExtra().map(x => `<div class="row"><div><b>${esc(x.name)}</b><small>${formatDateInput(x.date)}</small></div><b>${euro(x.amount)}</b><button class="edit-btn" type="button" onclick="editExtraIncome('${x.id}')" aria-label="Plusgeld bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delExtraIncome('${x.id}')" aria-label="Plusgeld löschen">×</button></div>`).join('') || '<p class="empty-note">Kein Plusgeld in diesem Monat.</p>';
 }
 function costRows(arr, type) {
-  return arr.map(x => `<div class="row"><div><b>${esc(x.name)}</b></div><b>${euro(x.amount)}</b><button class="delete-btn" type="button" onclick="delCost('${type}','${x.id}','${attr(x.name)}')">×</button></div>`).join('') || '<p class="empty-note">Noch nichts eingetragen.</p>';
+  return arr.map(x => `<div class="row"><div><b>${esc(x.name)}</b></div><b>${euro(x.amount)}</b><button class="edit-btn" type="button" onclick="editCost('${type}','${x.id}')" aria-label="Kosten bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delCost('${type}','${x.id}','${attr(x.name)}')" aria-label="Kosten löschen">×</button></div>`).join('') || '<p class="empty-note">Noch nichts eingetragen.</p>';
 }
 function expenseRow(x) {
   const bucket = bucketName(x.bucketId);
   const note = x.note ? esc(x.note) : 'ohne Notiz';
-  return `<div class="row expense-row"><div><b>${esc(bucket)}</b><small>${formatDateInput(x.date)} · ${note}</small></div><b>${euro(x.amount)}</b><button class="delete-btn" type="button" onclick="delExpense('${x.id}','${attr(bucket)}')">×</button></div>`;
+  return `<div class="row expense-row"><div><b>${esc(bucket)}</b><small>${formatDateInput(x.date)} · ${note}</small></div><b>${euro(x.amount)}</b><button class="edit-btn" type="button" onclick="editExpense('${x.id}')" aria-label="Ausgabe bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delExpense('${x.id}','${attr(bucket)}')" aria-label="Ausgabe löschen">×</button></div>`;
 }
 
 function renderMonth() {
@@ -287,6 +288,8 @@ function setView(id) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 function openHtml(html, confirm = false) {
+  q('#modalOk').textContent = 'OK';
+  q('#modalCancel').textContent = 'Abbrechen';
   q('#modalText').innerHTML = html;
   q('#modal').classList.remove('hidden');
   q('#modalCancel').style.display = confirm ? 'inline-flex' : 'none';
@@ -296,6 +299,86 @@ function openHtml(html, confirm = false) {
   });
 }
 async function ask(txt) { return await openHtml(`<p>${esc(txt)}</p>`, true); }
+function closeModal() {
+  q('#modal').classList.add('hidden');
+  q('#modalOk').textContent = 'OK';
+  q('#modalCancel').textContent = 'Abbrechen';
+  q('#modalCancel').style.display = 'inline-flex';
+}
+function fieldValue(id) { return q(id)?.value ?? ''; }
+function bucketOptionHtml(selected = '') {
+  return activeBuckets().map(b => `<option value="${attr(b.id)}" ${b.id === selected ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
+}
+function openEditor(title, html, onSave) {
+  q('#modalText').innerHTML = `<h3>${esc(title)}</h3><form id="modalForm" class="modal-form">${html}</form>`;
+  q('#modal').classList.remove('hidden');
+  q('#modalOk').textContent = 'Speichern';
+  q('#modalCancel').textContent = 'Abbrechen';
+  q('#modalCancel').style.display = 'inline-flex';
+  q('#modalCancel').onclick = closeModal;
+  q('#modalOk').onclick = async () => {
+    const ok = await onSave();
+    if (ok !== false) closeModal();
+  };
+  q('#modalForm').onsubmit = e => { e.preventDefault(); q('#modalOk').click(); };
+  setTimeout(() => q('#modalForm input, #modalForm select')?.focus(), 50);
+}
+function editCost(type, id) {
+  const arr = data[type] || [];
+  const item = arr.find(x => x.id === id);
+  if (!item) return;
+  openEditor('Kosten bearbeiten', `
+    <label>Name<input id="editName" value="${attr(item.name)}"></label>
+    <label>Betrag<input id="editAmount" inputmode="decimal" value="${String(item.amount || '').replace('.', ',')}"></label>
+  `, () => api(`/api/cost/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ name: fieldValue('#editName'), amount: num(fieldValue('#editAmount')) }) }));
+}
+function editExtraIncome(id) {
+  const item = (data.extraIncome || []).find(x => x.id === id);
+  if (!item) return;
+  openEditor('Plusgeld bearbeiten', `
+    <label>Name<input id="editName" value="${attr(item.name)}"></label>
+    <label>Betrag<input id="editAmount" inputmode="decimal" value="${String(item.amount || '').replace('.', ',')}"></label>
+    <label>Datum<input id="editDate" inputmode="numeric" value="${formatDateInput(item.date)}"></label>
+  `, () => api(`/api/extra-income/${id}`, { method: 'PATCH', body: JSON.stringify({ name: fieldValue('#editName'), amount: num(fieldValue('#editAmount')), date: fieldValue('#editDate') }) }));
+}
+function editExpense(id) {
+  const item = (data.expenses || []).find(x => x.id === id);
+  if (!item) return;
+  openEditor('Ausgabe bearbeiten', `
+    <label>Budget-Topf<select id="editBucket">${bucketOptionHtml(item.bucketId)}</select></label>
+    <label>Betrag<input id="editAmount" inputmode="decimal" value="${String(item.amount || '').replace('.', ',')}"></label>
+    <label>Datum<input id="editDate" inputmode="numeric" value="${formatDateInput(item.date)}"></label>
+    <label>Notiz<input id="editNote" value="${attr(item.note || '')}"></label>
+  `, () => api(`/api/expense/${id}`, { method: 'PATCH', body: JSON.stringify({ bucketId: fieldValue('#editBucket'), amount: num(fieldValue('#editAmount')), date: fieldValue('#editDate'), note: fieldValue('#editNote') }) }));
+}
+function editBucket(id) {
+  const b = (data.budgetBuckets || []).find(x => x.id === id);
+  if (!b) return;
+  const isFree = b.system === 'free_use' || b.id === 'bucket_frei';
+  openEditor('Budget-Topf bearbeiten', `
+    <label>Name<input id="editBucketName" value="${attr(b.name)}" ${isFree ? 'disabled' : ''}></label>
+    <label>Art<select id="editBucketMode" ${isFree ? '' : ''}>
+      <option value="money" ${b.mode === 'money' ? 'selected' : ''}>Geldbudget</option>
+      <option value="unit" ${b.mode === 'unit' ? 'selected' : ''}>Einheitenbudget</option>
+      <option value="saving" ${b.mode === 'saving' ? 'selected' : ''}>Spar-/Notfalltopf</option>
+    </select></label>
+    <label>Monatsbudget<input id="editBucketAmount" inputmode="decimal" value="${String(bucketBudget(b) || '').replace('.', ',')}"></label>
+    <label>Preis pro Einheit<input id="editBucketUnitAmount" inputmode="decimal" value="${String(b.unitAmount || '').replace('.', ',')}"></label>
+    <label>Einheiten pro Monat<input id="editBucketUnitCount" inputmode="numeric" value="${String(b.unitCount || '')}"></label>
+    <label>Abschnitte pro Monat<input id="editBucketPeriods" inputmode="numeric" value="${String(b.periods || 4)}"></label>
+  `, () => {
+    const mode = fieldValue('#editBucketMode');
+    return api(`/api/bucket/${id}`, { method: 'PATCH', body: JSON.stringify({
+      name: isFree ? b.name : fieldValue('#editBucketName'),
+      mode,
+      amount: num(fieldValue('#editBucketAmount')),
+      unitAmount: num(fieldValue('#editBucketUnitAmount')),
+      unitCount: num(fieldValue('#editBucketUnitCount')),
+      periods: num(fieldValue('#editBucketPeriods')) || 4,
+      active: b.active !== false
+    }) });
+  });
+}
 async function delCost(type, id, name) { if (await ask(`${name} löschen?`)) api(`/api/cost/${type}/${id}`, { method: 'DELETE' }); }
 async function delBucket(id, name) { if (await ask(`${name} löschen? Alte Ausgaben werden in Freie Verwendung verschoben.`)) api(`/api/bucket/${id}`, { method: 'DELETE' }); }
 async function toggleBucket(id, active) { api(`/api/bucket/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }); }
