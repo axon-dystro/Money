@@ -15,26 +15,27 @@ Danach im Browser öffnen:
 http://127.0.0.1:9999
 ```
 
-## Neu in dieser Version
+## Diese Version
 
-- Moderne Dashboard-Oberfläche
-- Budget-Töpfe statt nur einfache Tags
-- Reservierte Budgets werden direkt vom frei verfügbaren Geld abgezogen
-- Freies Guthaben per Auge ein-/ausblendbar
+- Komplett neues, schlichtes App-Design ohne Neon-/KI-Look
+- Nur noch Budget-Töpfe: keine Ausgabeart, keine freien Tags
+- Neuer Standard-Topf `Freie Verwendung` für Steam, Döner, Spiele, spontane Käufe usw.
+- Zweck einer Ausgabe wird nur in der Notiz gespeichert
+- Budget-Töpfe werden vom nicht verplanten Guthaben reserviert
+- Nicht verplantes Guthaben per Auge ein-/ausblendbar
 - Geldbudget, Einheitenbudget und Spar-/Notfalltopf
-- Automatische Wochen-/Abschnittslogik: Überziehung einer Woche reduziert die restlichen Wochen
-- Freie Ausgaben wie Steam/Restaurant gehen nicht aus Budget-Töpfen raus
-- Ausgaben können automatisch aufgerundet werden
-- Monatsreport mit Prozent-/Differenzanzeige
+- Wochen-/Abschnittslogik: Überziehung reduziert die restlichen Abschnitte
+- Aufrunden von Ausgaben optional
+- Saubere Monatsübersicht mit Budget, Ausgaben, Differenz und Nutzung
 - CSV-Export
-- PDF über Drucken/Speichern als PDF
+- Separater, druckfreundlicher Monatsbericht als PDF ohne App-Navigation und ohne Löschbuttons
 
 ## Datenmodell grob
 
 - `income`: Basis-Nettoeinkommen
 - `fixedCosts`: nicht kündbare Fixkosten
 - `cancelableCosts`: kündbare Kosten
-- `budgetBuckets`: Essen, Tanken, Friseur, Notfall usw.
-- `expenses`: alle Ausgaben, entweder `budget` oder `free`
+- `budgetBuckets`: Essen, Tanken, Friseur, Freie Verwendung usw.
+- `expenses`: alle Ausgaben sind einem Budget-Topf zugeordnet
 - `extraIncome`: Plusgeld in einzelnen Monaten
 - `settings`: Anzeige-/Rundungsoptionen
