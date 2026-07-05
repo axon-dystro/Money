@@ -1,1 +1,32 @@
-{"name":"Budget Master","short_name":"Budget","start_url":"/","display":"standalone","background_color":"#f4f6f8","theme_color":"#f4f6f8","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
+{
+  "name": "Budget Master",
+  "short_name": "Budget",
+  "start_url": "/?view=addExpense",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#f4f6f8",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "scope": "/",
+  "description": "Schneller Kosten- und Budgetrechner mit Budget-Töpfen.",
+  "shortcuts": [
+    {
+      "name": "Ausgabe eintragen",
+      "short_name": "Eintragen",
+      "url": "/?view=addExpense",
+      "description": "Direkt eine Ausgabe speichern"
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/?view=dashboard",
+      "description": "Budget-Töpfe ansehen"
+    }
+  ]
+}

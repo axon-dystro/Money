@@ -1,7 +1,7 @@
-const CACHE='budget-master-v10';
+const CACHE='budget-master-v42';
 self.addEventListener('install',e=>{self.skipWaiting();});
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.map(k=>k!==CACHE?caches.delete(k):null))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{
   if(e.request.url.includes('/api/')) return;
-  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+  e.respondWith(fetch(e.request).then(r=>r).catch(()=>caches.match(e.request)));
 });

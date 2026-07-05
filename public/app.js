@@ -47,6 +47,7 @@ async function load() {
   q('#expenseDate').value = formatDateInput(isoToday());
   q('#extraDate').value = formatDateInput(isoToday());
   render();
+  applyInitialView();
 }
 
 function expensePeriod(e, periods) {
@@ -91,6 +92,39 @@ function totals() {
   const unplanned = totalIncome - running - reserved;
   return { fixed, cancel, extra, totalIncome, running, reserved, allSpent, unplanned };
 }
+function moneyFlowRows(t) {
+  return `
+    <div class="flow-row"><span>Einnahmen</span><b>${euro(t.totalIncome)}</b></div>
+    <div class="flow-row"><span>Fixkosten</span><b>-${euro(t.fixed)}</b></div>
+    <div class="flow-row"><span>Kündbar</span><b>-${euro(t.cancel)}</b></div>
+    <div class="flow-row"><span>Budget-Töpfe</span><b>-${euro(t.reserved)}</b></div>
+    <div class="flow-row total"><span>Nicht verplant</span><b>${balanceVisible ? euro(t.unplanned) : '•••• €'}</b></div>`;
+}
+function bucketCardHtml(b, compact = false) {
+  const s = bucketStatus(b);
+  const pct = s.total ? Math.min(140, Math.max(0, (s.spent / s.total) * 100)) : 0;
+  let state = 'good';
+  if (s.left < 0) state = 'danger';
+  else if (s.spentNow > s.availableNow) state = 'warn';
+
+  const amountLine = b.mode === 'unit'
+    ? `${s.unitsUsed || 0} von ${num(b.unitCount)} Einheiten genutzt`
+    : `Aktueller Abschnitt: ${euro(s.availableNow - s.spentNow)} übrig`;
+  const nextLine = s.p < s.periods ? `Nächster Abschnitt ca. ${euro(s.nextAllowance)}` : 'Letzter Abschnitt des Monats';
+
+  return `<article class="bucket-card ${state}${compact ? ' quick-card' : ''}">
+    <div class="bucket-top"><h3>${esc(b.name)}</h3><b>${euro(s.left)} übrig</b></div>
+    <div class="meter" aria-label="${Math.round(pct)} Prozent genutzt"><span style="width:${pct}%"></span></div>
+    <div class="bucket-meta"><span>${euro(s.spent)} / ${euro(s.total)}</span><span>${s.total ? Math.round((s.spent / s.total) * 100) : 0}% genutzt</span></div>
+    <p class="budget-note"><strong>${esc(amountLine)}</strong>${compact ? '' : `<br>${esc(nextLine)}`}</p>
+  </article>`;
+}
+function moneyFlowCardHtml() {
+  return `<article class="bucket-card flow-card">
+    <div class="bucket-top"><h3>Geldfluss</h3><b>${balanceVisible ? euro(totals().unplanned) : '•••• €'}</b></div>
+    <div class="flow compact-flow">${moneyFlowRows(totals())}</div>
+  </article>`;
+}
 
 function render() {
   if (!data) return;
@@ -118,25 +152,9 @@ function renderOptions() {
 }
 
 function renderBuckets() {
-  q('#bucketCards').innerHTML = activeBuckets().map(b => {
-    const s = bucketStatus(b);
-    const pct = s.total ? Math.min(140, Math.max(0, (s.spent / s.total) * 100)) : 0;
-    let state = 'good';
-    if (s.left < 0) state = 'danger';
-    else if (s.spentNow > s.availableNow) state = 'warn';
-
-    const amountLine = b.mode === 'unit'
-      ? `${s.unitsUsed || 0} von ${num(b.unitCount)} Einheiten genutzt`
-      : `Aktueller Abschnitt: ${euro(s.availableNow - s.spentNow)} übrig`;
-    const nextLine = s.p < s.periods ? `Nächster Abschnitt ca. ${euro(s.nextAllowance)}` : 'Letzter Abschnitt des Monats';
-
-    return `<article class="bucket-card ${state}">
-      <div class="bucket-top"><h3>${esc(b.name)}</h3><b>${euro(s.left)} übrig</b></div>
-      <div class="meter" aria-label="${Math.round(pct)} Prozent genutzt"><span style="width:${pct}%"></span></div>
-      <div class="bucket-meta"><span>${euro(s.spent)} / ${euro(s.total)}</span><span>${s.total ? Math.round((s.spent / s.total) * 100) : 0}% genutzt</span></div>
-      <p class="budget-note"><strong>${esc(amountLine)}</strong><br>${esc(nextLine)}</p>
-    </article>`;
-  }).join('') || '<p class="empty-note">Noch keine Budget-Töpfe angelegt.</p>';
+  const cards = activeBuckets().map(b => bucketCardHtml(b)).join('');
+  q('#bucketCards').innerHTML = cards ? `${cards}${moneyFlowCardHtml()}` : '<p class="empty-note">Noch keine Budget-Töpfe angelegt.</p>';
+  renderQuickBudgetOverview();
 
   q('#bucketSettings').innerHTML = (data.budgetBuckets || []).map(b => {
     const details = b.mode === 'unit' ? `${num(b.unitCount)} × ${euro(b.unitAmount)}` : `${euro(bucketBudget(b))}`;
@@ -152,16 +170,16 @@ function renderBuckets() {
     </div>`;
   }).join('');
 }
+function renderQuickBudgetOverview() {
+  const target = q('#quickBudgetOverview');
+  if (!target) return;
+  const buckets = activeBuckets();
+  target.innerHTML = buckets.length ? `
+    <div class="quick-budget-head"><span>Budgetstatus</span><button type="button" onclick="setView('dashboard')">Details</button></div>
+    <div class="quick-budget-grid">${buckets.map(b => bucketCardHtml(b, true)).join('')}</div>` : '';
+}
 
 function renderLists() {
-  const t = totals();
-  q('#moneyFlow').innerHTML = `
-    <div class="flow-row"><span>Einnahmen</span><b>${euro(t.totalIncome)}</b></div>
-    <div class="flow-row"><span>Fixkosten</span><b>-${euro(t.fixed)}</b></div>
-    <div class="flow-row"><span>Kündbare Kosten</span><b>-${euro(t.cancel)}</b></div>
-    <div class="flow-row"><span>Budget-Töpfe</span><b>-${euro(t.reserved)}</b></div>
-    <div class="flow-row total"><span>Nicht verplant</span><b>${balanceVisible ? euro(t.unplanned) : '•••• €'}</b></div>`;
-
   const latest = [...monthExpenses()].sort((a, b) => parseDateInput(b.date).localeCompare(parseDateInput(a.date))).slice(0, 8);
   q('#recentList').innerHTML = latest.map(expenseRow).join('') || '<p class="empty-note">Noch keine Buchungen in diesem Monat.</p>';
   q('#fixedList').innerHTML = costRows(data.fixedCosts || [], 'fixedCosts');
@@ -247,11 +265,23 @@ function printCalendarHtml() {
   return html;
 }
 
+function applyInitialView() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get('view');
+  if (requested && q(`#${requested}`)) {
+    setView(requested);
+    if (requested === 'addExpense') setTimeout(() => q('#expenseAmount')?.focus(), 250);
+    return;
+  }
+  document.body.dataset.view = q('.view.active')?.id || 'dashboard';
+}
+
 function showDay(date) {
   const entries = monthExpenses().filter(e => parseDateInput(e.date) === date);
   openHtml(`<h3>${formatDateInput(date)}</h3><div class="list" style="margin-top:12px">${entries.map(expenseRow).join('') || '<p class="empty-note">Keine Ausgaben.</p>'}</div>`, false);
 }
 function setView(id) {
+  document.body.dataset.view = id;
   qa('.view').forEach(v => v.classList.toggle('active', v.id === id));
   qa('.nav button').forEach(b => b.classList.toggle('active', b.dataset.view === id));
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -305,6 +335,7 @@ function wire() {
     api('/api/expense', { method: 'POST', body: JSON.stringify({ bucketId: q('#expenseBucket').value || freeBucketId(), amount: num(q('#expenseAmount').value), date: q('#expenseDate').value, note: q('#expenseNote').value }) });
     q('#expenseAmount').value = '';
     q('#expenseNote').value = '';
+    setTimeout(() => q('#expenseAmount')?.focus(), 200);
   };
   q('#bucketForm').onsubmit = e => {
     e.preventDefault();

@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Budget Master</title>
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=31">
+  <link rel="stylesheet" href="/style.css?v=42">
 </head>
 <body>
 <main class="app-shell">
@@ -63,19 +63,13 @@
 
     <div id="bucketCards" class="bucket-grid"></div>
 
-    <div class="dashboard-bottom">
-      <article class="panel compact-panel">
-        <h3>Geldfluss</h3>
-        <div id="moneyFlow" class="flow"></div>
-      </article>
-      <article class="panel">
-        <div class="panel-head">
-          <h3>Letzte Buchungen</h3>
-          <button id="goMonthFromRecent" class="text-button" type="button">Monat ansehen</button>
-        </div>
-        <div id="recentList" class="list"></div>
-      </article>
-    </div>
+    <article class="panel recent-panel">
+      <div class="panel-head">
+        <h3>Letzte Buchungen</h3>
+        <button id="goMonthFromRecent" class="text-button" type="button">Monat ansehen</button>
+      </div>
+      <div id="recentList" class="list"></div>
+    </article>
   </section>
 
   <section id="addExpense" class="view">
@@ -85,7 +79,8 @@
         <p>Nur Budget-Topf wählen, Betrag eintragen und speichern. Der Zweck gehört in die Notiz.</p>
       </div>
     </div>
-    <form id="expenseForm" class="form-panel">
+    <div id="quickBudgetOverview" class="quick-budget-overview" aria-label="Budgetstatus"></div>
+    <form id="expenseForm" class="form-panel quick-entry-panel">
       <label>Budget-Topf<select id="expenseBucket"></select></label>
       <label>Betrag<input id="expenseAmount" inputmode="decimal" placeholder="z. B. 12,50"></label>
       <label>Datum<input id="expenseDate" type="text" inputmode="numeric" autocomplete="off" placeholder="TT.MM.JJJJ"></label>
@@ -207,6 +202,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=31"></script>
+<script src="/app.js?v=42"></script>
 </body>
 </html>

@@ -39,3 +39,8 @@ http://127.0.0.1:9999
 - `expenses`: alle Ausgaben sind einem Budget-Topf zugeordnet
 - `extraIncome`: Plusgeld in einzelnen Monaten
 - `settings`: Anzeige-/Rundungsoptionen
+
+## Mobile-Update
+- Dashboard: Geldfluss sitzt jetzt als normale Karte neben den Budget-Töpfen. Darunter steht nur noch „Letzte Buchungen“.
+- PWA/App-Icon: `manifest.json` startet mit `/?view=addExpense`, dadurch öffnet die installierte App direkt die Eingabeseite.
+- Handy-Ansicht: In „Schnell eintragen“ steht oben eine kompakte Budgetübersicht; danach direkt Topf, Betrag, Datum, Notiz.
