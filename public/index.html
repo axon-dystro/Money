@@ -83,7 +83,7 @@
     <form id="expenseForm" class="form-panel quick-entry-panel">
       <label>Budget-Topf<select id="expenseBucket"></select></label>
       <label>Betrag<input id="expenseAmount" inputmode="decimal" placeholder="z. B. 12,50"></label>
-      <label>Datum<input id="expenseDate" type="text" inputmode="numeric" autocomplete="off" placeholder="TT.MM.JJJJ"></label>
+      <label>Datum<input id="expenseDate" type="date" autocomplete="off" ></label>
       <label class="wide">Notiz<input id="expenseNote" placeholder="z. B. Aldi, Steam-Spiel, Döner"></label>
       <button class="primary wide" type="submit">Speichern</button>
     </form>
@@ -139,7 +139,7 @@
         <form id="extraIncomeForm" class="inline-form three">
           <input placeholder="Urlaubsgeld, Prämie..." id="extraName">
           <input placeholder="Betrag" inputmode="decimal" id="extraAmount">
-          <input placeholder="TT.MM.JJJJ" inputmode="numeric" id="extraDate">
+          <input  inputmode="numeric" id="extraDate">
           <button type="submit">+</button>
         </form>
         <div id="monthExtraIncome" class="list small-list"></div>

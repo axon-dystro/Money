@@ -88,8 +88,12 @@ function totals() {
   const totalIncome = num(data.income) + extra;
   const running = fixed + cancel;
   const reserved = activeBuckets().reduce((s, b) => s + bucketBudget(b), 0);
-  const allSpent = sum(monthExpenses());
-  const unplanned = totalIncome - running - reserved;
+  const expenses = monthExpenses();
+  const allSpent = sum(expenses);
+  const bucketIds = new Set(activeBuckets().map(b=>b.id));
+  const unbucketed = expenses.filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+num(e.amount),0);
+  const overspend = activeBuckets().reduce((a,b)=>{ const st=bucketStatus(b); return a+Math.max(0,-st.left); },0);
+  const unplanned = totalIncome - running - reserved - unbucketed - overspend;
   return { fixed, cancel, extra, totalIncome, running, reserved, allSpent, unplanned };
 }
 function moneyFlowRows(t) {
