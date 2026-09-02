@@ -25,10 +25,12 @@ function parseUmsatzweckerMail(mail) {
   if (!/sparkasse|umsatzwecker|kontowecker/i.test(combined)) return null;
 
   const amountMatches = [...combined.matchAll(/([+-]?\d{1,3}(?:\.\d{3})*(?:,\d{2})|[+-]?\d+(?:,\d{2}))\s*(?:EUR|€)/gi)];
-  const amount = amountMatches.length ? parseGermanAmount(amountMatches[amountMatches.length - 1][1]) : null;
+  const rawAmount = amountMatches.length ? amountMatches[amountMatches.length - 1][1] : '';
+  const amount = parseGermanAmount(rawAmount);
   if (!amount || amount <= 0) return null;
 
-  const outgoing = /geldausgang|abbuchung|belastung|abgebucht|kartenzahlung|zahlung/i.test(combined) && !/geldeingang|gutschrift|eingegangen/i.test(combined);
+  const incoming = /geldeingang|gutschrift|eingegangen|gutgeschrieben/i.test(combined);
+  const outgoing = /geldausgang|abbuchung|belastung|abgebucht|kartenzahlung|zahlung/i.test(combined) && !incoming;
 
   const labelPatterns = [
     /(?:zahlungsempf[aä]nger|empf[aä]nger|h[aä]ndler|zahlung bei|umsatz bei|verwendungszweck)\s*[:\-]\s*([^|]{2,100}?)(?=\s{2,}|betrag|datum|iban|$)/i,
@@ -42,7 +44,7 @@ function parseUmsatzweckerMail(mail) {
   if (!merchant) merchant = subject.replace(/umsatzwecker|kontowecker|sparkasse/gi, '').replace(/[:\-]+/g, ' ').trim() || 'Sparkassen-Umsatz';
 
   return {
-    type: outgoing ? 'expense' : 'unknown',
+    type: incoming ? 'income' : outgoing || /^\s*-/.test(rawAmount) ? 'expense' : 'unknown',
     amount,
     merchant: merchant.slice(0, 120),
     subject,

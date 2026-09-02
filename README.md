@@ -75,3 +75,33 @@ Bekannte Händler werden automatisch zugeordnet, u. a. HIT/Rewe/Lidl/Aldi/Kaufla
 Der Import schützt über die Mail-Message-ID vor Doppelimporten. Die letzten Importversuche sind unter `/api/mail-import-log` sichtbar.
 
 Wichtig: Das genaue Format der Sparkassen-Umsatzwecker-Mail muss einmal mit einer echten Mail getestet werden. Der Parser ist absichtlich tolerant gebaut, aber Händlername und Buchungsart können je nach Sparkasse anders formuliert sein.
+
+## Wiederkehrende Beträge
+
+Budget-Töpfe, Fixkosten und kündbare Kosten können wöchentlich, alle zwei Wochen, monatlich, vierteljährlich, jährlich oder einmalig angelegt werden. Money rechnet daraus automatisch den Monatsanteil:
+
+- wöchentlich: Betrag × 52 / 12
+- alle zwei Wochen: Betrag × 26 / 12
+- vierteljährlich: Betrag / 3
+- jährlich: Betrag / 12
+- einmalig: nur im Monat des Fälligkeitsdatums
+
+Bestehende Einträge bleiben automatisch monatlich.
+
+## Sparkassen-Kontoauszug als PDF importieren
+
+Unter `Monat` kann ein Sparkassen-Kontoauszug bis 10 MB hochgeladen werden. Money zeigt vor dem Import eine bearbeitbare Vorschau mit Datum, Händler, Betrag, Einnahme/Ausgabe und Zuordnung. Erst nach Bestätigung werden die ausgewählten Buchungen gespeichert.
+
+Der Import:
+
+- erkennt Sparkassen-Buchungszeilen und Ein-/Ausgänge,
+- schlägt Budget-Töpfe oder bereits angelegte Fixkosten vor,
+- übernimmt Bankbeträge centgenau und unabhängig von der manuellen Aufrundungsoption,
+- schützt über einen stabilen Transaktions-Hash vor Doppelimporten,
+- importiert Geldeingänge als Plusgeld.
+
+Für die PDF-Erkennung werden `multer` und `pdf-parse` verwendet. Nach dem Update reicht:
+
+```bash
+npm ci
+```
