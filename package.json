@@ -1,1 +1,1 @@
-{"name":"budget-master","version":"1.0.0","private":true,"type":"commonjs","scripts":{"start":"node server.js"},"dependencies":{"express":"^4.19.2"}}
+{"name":"budget-master","version":"1.0.0","private":true,"type":"commonjs","scripts":{"start":"node server.js"},"dependencies":{"express":"^4.19.2","imapflow":"^1.0.181","mailparser":"^3.7.4"}}
