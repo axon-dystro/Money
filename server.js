@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { createSparkasseMailPoller } = require('./sparkasse-mail');
 const app = express();
 const PORT = process.env.PORT || 9999;
 const DB_PATH = path.join(__dirname, 'data.json');
@@ -20,6 +21,8 @@ const defaultData = {
   budgetBuckets: DEFAULT_BUCKETS,
   expenses: [],
   extraIncome: [],
+  processedMailIds: [],
+  mailImportLog: [],
   settings: { hideFreeBalance: true, roundExpensesUp: true }
 };
 
@@ -83,11 +86,11 @@ function freeBucketId(buckets) {
 }
 function findBestBucket(e, buckets) {
   if (e.bucketId && buckets.some(b => b.id === e.bucketId)) return buckets.find(b => b.id === e.bucketId);
-  const source = normalizeName(e.category || e.tag || e.name || '');
+  const source = normalizeName(e.category || e.tag || e.name || e.merchant || e.note || '');
   const pairs = [
-    ['essen', ['essen', 'mealprep', 'lebensmittel', 'aldi', 'lidl', 'rewe']],
-    ['tanken', ['tanken', 'sprit', 'benzin', 'roller']],
-    ['friseur', ['friseur', 'frisur', 'hair']],
+    ['essen', ['essen', 'mealprep', 'lebensmittel', 'aldi', 'lidl', 'rewe', 'hit', 'kaufland', 'edeka', 'netto', 'penny']],
+    ['tanken', ['tanken', 'sprit', 'benzin', 'diesel', 'aral', 'shell', 'jet', 'esso']],
+    ['friseur', ['friseur', 'frisur', 'hair', 'barber']],
     ['notfall', ['notfall', 'sparen', 'reserve']]
   ];
   for (const [bucketHint, words] of pairs) {
@@ -108,13 +111,17 @@ function migrateExpenses(rawExpenses, buckets) {
       note = note ? `${originalCategory} · ${note}` : originalCategory;
     }
     return {
+      ...e,
       id: e.id || id(),
       kind: 'budget',
       bucketId: bucket?.id || freeBucketId(buckets),
       category: bucket?.name || 'Freie Verwendung',
       amount: safeNumber(e.amount, 0),
       note,
-      date: normalizeDate(e.date)
+      date: normalizeDate(e.date),
+      merchant: cleanText(e.merchant, ''),
+      source: cleanText(e.source, ''),
+      sourceId: cleanText(e.sourceId, '')
     };
   });
 }
@@ -128,6 +135,8 @@ function migrate(raw = {}) {
     budgetBuckets: buckets,
     expenses: migrateExpenses(raw.expenses, buckets),
     extraIncome: Array.isArray(raw.extraIncome) ? raw.extraIncome.map(x => ({ id: x.id || id(), name: cleanText(x.name, 'Plusgeld'), amount: safeNumber(x.amount, 0), date: normalizeDate(x.date), note: cleanText(x.note, '') })) : [],
+    processedMailIds: Array.isArray(raw.processedMailIds) ? raw.processedMailIds.slice(-1000) : [],
+    mailImportLog: Array.isArray(raw.mailImportLog) ? raw.mailImportLog.slice(-100) : [],
     settings: { ...defaultData.settings, ...(raw.settings || {}) }
   };
   delete d.consumptionCategories;
@@ -143,10 +152,48 @@ function load() {
 }
 function save(data) { fs.writeFileSync(DB_PATH, JSON.stringify(migrate(data), null, 2)); }
 
+function importSparkasseTransaction(tx) {
+  const d = load();
+  if (!tx?.messageId || d.processedMailIds.includes(tx.messageId)) return false;
+
+  d.processedMailIds.push(tx.messageId);
+  d.processedMailIds = d.processedMailIds.slice(-1000);
+
+  if (tx.type !== 'expense') {
+    d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'ignored', subject: tx.subject || '', reason: 'not-expense' });
+    d.mailImportLog = d.mailImportLog.slice(-100);
+    save(d);
+    return false;
+  }
+
+  const bucket = findBestBucket({ merchant: tx.merchant, name: tx.merchant }, d.budgetBuckets);
+  let amount = safeNumber(tx.amount, 0);
+  if (d.settings.roundExpensesUp) amount = Math.ceil(amount);
+
+  d.expenses.push({
+    id: id(),
+    kind: 'budget',
+    bucketId: bucket?.id || freeBucketId(d.budgetBuckets),
+    category: bucket?.name || 'Freie Verwendung',
+    amount,
+    note: tx.merchant || 'Sparkassen-Umsatz',
+    merchant: tx.merchant || '',
+    date: normalizeDate(tx.receivedAt),
+    source: 'sparkasse-umsatzwecker',
+    sourceId: tx.messageId
+  });
+  d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'imported', merchant: tx.merchant || '', amount, bucket: bucket?.name || 'Freie Verwendung' });
+  d.mailImportLog = d.mailImportLog.slice(-100);
+  save(d);
+  console.log(`[Sparkasse-Mail] Importiert: ${tx.merchant || 'Umsatz'} ${amount.toFixed(2)} EUR -> ${bucket?.name || 'Freie Verwendung'}`);
+  return true;
+}
+
 app.use(express.json({ limit: '300kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', (req, res) => res.json(load()));
+app.get('/api/mail-import-log', (req, res) => res.json(load().mailImportLog || []));
 app.post('/api/income', (req, res) => { const d = load(); d.income = safeNumber(req.body.income, 0); save(d); res.json(d); });
 app.post('/api/settings', (req, res) => { const d = load(); d.settings = { ...d.settings, ...req.body }; save(d); res.json(d); });
 
@@ -195,7 +242,6 @@ app.delete('/api/bucket/:id', (req, res) => {
   save(d); res.json(d);
 });
 
-// Old category endpoints are intentionally kept as harmless no-ops for older browsers/service workers.
 app.post('/api/category', (req, res) => res.json(load()));
 app.delete('/api/category/:name', (req, res) => res.json(load()));
 
@@ -207,7 +253,7 @@ app.post('/api/expense', (req, res) => {
   let amount = safeNumber(req.body.amount, 0);
   if (!amount && bucket?.mode === 'unit') amount = safeNumber(bucket.unitAmount, 0);
   if (d.settings.roundExpensesUp) amount = Math.ceil(amount);
-  d.expenses.push({ id: id(), kind: 'budget', bucketId: bucket.id, category: bucket.name, amount, note: cleanText(req.body.note, ''), date });
+  d.expenses.push({ id: id(), kind: 'budget', bucketId: bucket.id, category: bucket.name, amount, note: cleanText(req.body.note, ''), date, merchant: '', source: '', sourceId: '' });
   save(d); res.json(d);
 });
 app.patch('/api/expense/:id', (req, res) => {
@@ -242,5 +288,29 @@ app.patch('/api/extra-income/:id', (req, res) => {
 });
 app.delete('/api/extra-income/:id', (req, res) => { const d = load(); d.extraIncome = d.extraIncome.filter(x => x.id !== req.params.id); save(d); res.json(d); });
 
+const sparkassePoller = createSparkasseMailPoller({
+  onTransaction: async tx => importSparkasseTransaction(tx),
+  onDebug: async info => {
+    const d = load();
+    if (info?.messageId && !d.processedMailIds.includes(info.messageId)) {
+      d.processedMailIds.push(info.messageId);
+      d.processedMailIds = d.processedMailIds.slice(-1000);
+      d.mailImportLog.push({ at: new Date().toISOString(), status: 'unparsed', ...info });
+      d.mailImportLog = d.mailImportLog.slice(-100);
+      save(d);
+    }
+  }
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(PORT, '127.0.0.1', () => console.log(`Budget Master läuft intern auf http://127.0.0.1:${PORT}`));
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Budget Master läuft intern auf http://127.0.0.1:${PORT}`);
+  sparkassePoller.start();
+});
+
+async function shutdown() {
+  await sparkassePoller.stop();
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
