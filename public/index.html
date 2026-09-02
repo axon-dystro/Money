@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Budget Master</title>
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=43">
+  <link rel="stylesheet" href="/style.css?v=44">
 </head>
 <body>
 <main class="app-shell">
@@ -105,6 +105,20 @@
       <button id="exportCsv" type="button">CSV herunterladen</button>
       <button id="printReport" type="button">Monatsbericht als PDF</button>
     </div>
+    <article class="panel statement-import-panel no-print">
+      <div class="panel-head">
+        <div>
+          <h3>Kontoauszug importieren</h3>
+          <p class="panel-copy">Sparkassen-PDF auswählen, erkannte Buchungen prüfen und erst danach übernehmen.</p>
+        </div>
+      </div>
+      <form id="statementUploadForm" class="upload-form">
+        <input id="statementFile" name="statement" type="file" accept="application/pdf,.pdf" required>
+        <button class="primary" type="submit">PDF prüfen</button>
+      </form>
+      <p id="statementImportStatus" class="import-status" aria-live="polite"></p>
+      <div id="statementPreview" class="statement-preview hidden"></div>
+    </article>
     <div id="reportSummary" class="report-table-wrap"></div>
     <article class="panel">
       <div class="panel-head"><h3>Alle Ausgaben</h3></div>
@@ -154,9 +168,18 @@
             <option value="unit">Einheitenbudget</option>
             <option value="saving">Spar-/Notfalltopf</option>
           </select>
-          <input id="bucketAmount" inputmode="decimal" placeholder="Monatsbudget, z. B. 200">
+          <select id="bucketFrequency" aria-label="Wie oft gilt der Betrag?">
+            <option value="monthly">Monatlich</option>
+            <option value="weekly">Wöchentlich</option>
+            <option value="biweekly">Alle 2 Wochen</option>
+            <option value="quarterly">Vierteljährlich</option>
+            <option value="yearly">Jährlich</option>
+            <option value="one_time">Einmalig</option>
+          </select>
+          <input id="bucketDueDate" class="hidden" type="date" aria-label="Fällig am">
+          <input id="bucketAmount" inputmode="decimal" placeholder="Betrag für diesen Zeitraum, z. B. 200">
           <input id="bucketUnitAmount" class="hidden" inputmode="decimal" placeholder="Preis pro Einheit, z. B. 32">
-          <input id="bucketUnitCount" class="hidden" inputmode="numeric" placeholder="Einheiten pro Monat, z. B. 2">
+          <input id="bucketUnitCount" class="hidden" inputmode="numeric" placeholder="Einheiten pro Zeitraum, z. B. 2">
           <input id="bucketPeriods" inputmode="numeric" placeholder="Aufteilung, z. B. 4 Wochen">
           <button class="primary" type="submit">Topf anlegen</button>
         </form>
@@ -169,9 +192,13 @@
 
       <article class="panel">
         <h3>Fixkosten</h3>
-        <form id="fixedForm" class="inline-form">
+        <form id="fixedForm" class="cost-form">
           <input placeholder="Name" id="fixedName">
           <input placeholder="Betrag" inputmode="decimal" id="fixedAmount">
+          <select id="fixedFrequency" aria-label="Wiederholung">
+            <option value="monthly">Monatlich</option><option value="weekly">Wöchentlich</option><option value="biweekly">Alle 2 Wochen</option><option value="quarterly">Vierteljährlich</option><option value="yearly">Jährlich</option><option value="one_time">Einmalig</option>
+          </select>
+          <input id="fixedDueDate" class="hidden" type="date" aria-label="Fällig am">
           <button type="submit">+</button>
         </form>
         <div id="fixedList" class="list settings-list"></div>
@@ -179,9 +206,13 @@
 
       <article class="panel">
         <h3>Kündbare Kosten</h3>
-        <form id="cancelForm" class="inline-form">
+        <form id="cancelForm" class="cost-form">
           <input placeholder="Name" id="cancelName">
           <input placeholder="Betrag" inputmode="decimal" id="cancelAmount">
+          <select id="cancelFrequency" aria-label="Wiederholung">
+            <option value="monthly">Monatlich</option><option value="weekly">Wöchentlich</option><option value="biweekly">Alle 2 Wochen</option><option value="quarterly">Vierteljährlich</option><option value="yearly">Jährlich</option><option value="one_time">Einmalig</option>
+          </select>
+          <input id="cancelDueDate" class="hidden" type="date" aria-label="Fällig am">
           <button type="submit">+</button>
         </form>
         <div id="cancelList" class="list settings-list"></div>
@@ -202,6 +233,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=43"></script>
+<script src="/app.js?v=44"></script>
 </body>
 </html>

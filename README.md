@@ -44,3 +44,64 @@ http://127.0.0.1:9999
 - Dashboard: Geldfluss sitzt jetzt als normale Karte neben den Budget-Töpfen. Darunter steht nur noch „Letzte Buchungen“.
 - PWA/App-Icon: `manifest.json` startet mit `/?view=addExpense`, dadurch öffnet die installierte App direkt die Eingabeseite.
 - Handy-Ansicht: In „Schnell eintragen“ steht oben eine kompakte Budgetübersicht; danach direkt Topf, Betrag, Datum, Notiz.
+
+## Sparkasse Umsatzwecker Import
+
+Money kann ein eigenes IMAP-Postfach regelmäßig nach Sparkassen-Umsatzwecker-Mails prüfen und erkannte Geldausgänge automatisch als Ausgaben eintragen.
+
+Empfohlenes Postfach:
+
+```text
+umsatzwecker@dnd-tools.de
+```
+
+Konfiguration über Umgebungsvariablen, siehe `.env.example`. Das Passwort gehört ausschließlich auf den Server und niemals ins Repository.
+
+Beispiel:
+
+```bash
+export SPARKASSE_MAIL_ENABLED=true
+export SPARKASSE_IMAP_HOST=mail.dnd-tools.de
+export SPARKASSE_IMAP_PORT=993
+export SPARKASSE_IMAP_SECURE=true
+export SPARKASSE_IMAP_USER=umsatzwecker@dnd-tools.de
+export SPARKASSE_IMAP_PASS='DEIN_PASSWORT'
+export SPARKASSE_POLL_INTERVAL_MS=180000
+npm start
+```
+
+Bekannte Händler werden automatisch zugeordnet, u. a. HIT/Rewe/Lidl/Aldi/Kaufland/Edeka zu `Essen / Mealprep` und Aral/Shell/Jet/Esso zu `Tanken`. Nicht erkannte Händler landen in `Freie Verwendung`.
+
+Der Import schützt über die Mail-Message-ID vor Doppelimporten. Die letzten Importversuche sind unter `/api/mail-import-log` sichtbar.
+
+Wichtig: Das genaue Format der Sparkassen-Umsatzwecker-Mail muss einmal mit einer echten Mail getestet werden. Der Parser ist absichtlich tolerant gebaut, aber Händlername und Buchungsart können je nach Sparkasse anders formuliert sein.
+
+## Wiederkehrende Beträge
+
+Budget-Töpfe, Fixkosten und kündbare Kosten können wöchentlich, alle zwei Wochen, monatlich, vierteljährlich, jährlich oder einmalig angelegt werden. Money rechnet daraus automatisch den Monatsanteil:
+
+- wöchentlich: Betrag × 52 / 12
+- alle zwei Wochen: Betrag × 26 / 12
+- vierteljährlich: Betrag / 3
+- jährlich: Betrag / 12
+- einmalig: nur im Monat des Fälligkeitsdatums
+
+Bestehende Einträge bleiben automatisch monatlich.
+
+## Sparkassen-Kontoauszug als PDF importieren
+
+Unter `Monat` kann ein Sparkassen-Kontoauszug bis 10 MB hochgeladen werden. Money zeigt vor dem Import eine bearbeitbare Vorschau mit Datum, Händler, Betrag, Einnahme/Ausgabe und Zuordnung. Erst nach Bestätigung werden die ausgewählten Buchungen gespeichert.
+
+Der Import:
+
+- erkennt Sparkassen-Buchungszeilen und Ein-/Ausgänge,
+- schlägt Budget-Töpfe oder bereits angelegte Fixkosten vor,
+- übernimmt Bankbeträge centgenau und unabhängig von der manuellen Aufrundungsoption,
+- schützt über einen stabilen Transaktions-Hash vor Doppelimporten,
+- importiert Geldeingänge als Plusgeld.
+
+Für die PDF-Erkennung werden `multer` und `pdf-parse` verwendet. Nach dem Update reicht:
+
+```bash
+npm ci
+```

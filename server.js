@@ -1,16 +1,20 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
+const { createSparkasseMailPoller } = require('./sparkasse-mail');
+const { normalizeFrequency } = require('./recurrence');
+const { parseSparkasseStatementPdf } = require('./statement-parser');
 const app = express();
 const PORT = process.env.PORT || 9999;
 const DB_PATH = path.join(__dirname, 'data.json');
 
 const DEFAULT_BUCKETS = [
-  { id: 'bucket_essen', name: 'Essen / Mealprep', amount: 200, mode: 'money', periods: 4, active: true },
-  { id: 'bucket_tanken', name: 'Tanken', amount: 40, mode: 'money', periods: 4, active: true },
-  { id: 'bucket_friseur', name: 'Friseur', amount: 64, mode: 'unit', unitAmount: 32, unitCount: 2, periods: 4, active: true },
-  { id: 'bucket_notfall', name: 'Notfall-Sparen', amount: 50, mode: 'saving', periods: 1, active: true },
-  { id: 'bucket_frei', name: 'Freie Verwendung', amount: 50, mode: 'money', periods: 4, active: true, system: 'free_use' }
+  { id: 'bucket_essen', name: 'Essen / Mealprep', amount: 200, mode: 'money', frequency: 'monthly', dueDate: '', periods: 4, active: true },
+  { id: 'bucket_tanken', name: 'Tanken', amount: 40, mode: 'money', frequency: 'monthly', dueDate: '', periods: 4, active: true },
+  { id: 'bucket_friseur', name: 'Friseur', amount: 64, mode: 'unit', unitAmount: 32, unitCount: 2, frequency: 'monthly', dueDate: '', periods: 4, active: true },
+  { id: 'bucket_notfall', name: 'Notfall-Sparen', amount: 50, mode: 'saving', frequency: 'monthly', dueDate: '', periods: 1, active: true },
+  { id: 'bucket_frei', name: 'Freie Verwendung', amount: 50, mode: 'money', frequency: 'monthly', dueDate: '', periods: 4, active: true, system: 'free_use' }
 ];
 
 const defaultData = {
@@ -20,6 +24,9 @@ const defaultData = {
   budgetBuckets: DEFAULT_BUCKETS,
   expenses: [],
   extraIncome: [],
+  processedMailIds: [],
+  mailImportLog: [],
+  statementImportLog: [],
   settings: { hideFreeBalance: true, roundExpensesUp: true }
 };
 
@@ -53,8 +60,26 @@ function cleanBucket(body = {}, existing = {}) {
     mode,
     unitAmount,
     unitCount,
+    frequency: normalizeFrequency(body.frequency, normalizeFrequency(existing.frequency)),
+    dueDate: normalizeOptionalDate(body.dueDate === undefined ? existing.dueDate : body.dueDate),
     periods: Math.max(1, Math.min(6, safeNumber(body.periods, safeNumber(existing.periods, 4)) || 4)),
     active: body.active === undefined ? (existing.active !== false) : !!body.active
+  };
+}
+function normalizeOptionalDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(raw) || /^\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}$/.test(raw)) return normalizeDate(raw);
+  return '';
+}
+function cleanCost(item = {}, existing = {}) {
+  return {
+    ...existing,
+    id: item.id || existing.id || id(),
+    name: cleanText(item.name, existing.name || 'Kosten'),
+    amount: safeNumber(item.amount, safeNumber(existing.amount, 0)),
+    frequency: normalizeFrequency(item.frequency, normalizeFrequency(existing.frequency)),
+    dueDate: normalizeOptionalDate(item.dueDate === undefined ? existing.dueDate : item.dueDate)
   };
 }
 function ensureBuckets(rawBuckets) {
@@ -83,11 +108,11 @@ function freeBucketId(buckets) {
 }
 function findBestBucket(e, buckets) {
   if (e.bucketId && buckets.some(b => b.id === e.bucketId)) return buckets.find(b => b.id === e.bucketId);
-  const source = normalizeName(e.category || e.tag || e.name || '');
+  const source = normalizeName(e.category || e.tag || e.name || e.merchant || e.note || '');
   const pairs = [
-    ['essen', ['essen', 'mealprep', 'lebensmittel', 'aldi', 'lidl', 'rewe']],
-    ['tanken', ['tanken', 'sprit', 'benzin', 'roller']],
-    ['friseur', ['friseur', 'frisur', 'hair']],
+    ['essen', ['essen', 'mealprep', 'lebensmittel', 'aldi', 'lidl', 'rewe', 'hit', 'kaufland', 'edeka', 'netto', 'penny']],
+    ['tanken', ['tanken', 'sprit', 'benzin', 'diesel', 'aral', 'shell', 'jet', 'esso']],
+    ['friseur', ['friseur', 'frisur', 'hair', 'barber']],
     ['notfall', ['notfall', 'sparen', 'reserve']]
   ];
   for (const [bucketHint, words] of pairs) {
@@ -100,21 +125,27 @@ function findBestBucket(e, buckets) {
 }
 function migrateExpenses(rawExpenses, buckets) {
   return (Array.isArray(rawExpenses) ? rawExpenses : []).map(e => {
+    const kind = ['fixedCosts', 'cancelableCosts'].includes(e.kind) ? e.kind : 'budget';
     const bucket = findBestBucket(e, buckets);
     const originalCategory = cleanText(e.category || e.tag || '', '');
     let note = cleanText(e.note, '');
-    const movedToFree = bucket && (bucket.system === 'free_use' || bucket.id === 'bucket_frei');
+    const movedToFree = kind === 'budget' && bucket && (bucket.system === 'free_use' || bucket.id === 'bucket_frei');
     if (movedToFree && originalCategory && normalizeName(originalCategory) !== normalizeName(bucket.name)) {
       note = note ? `${originalCategory} · ${note}` : originalCategory;
     }
     return {
+      ...e,
       id: e.id || id(),
-      kind: 'budget',
-      bucketId: bucket?.id || freeBucketId(buckets),
-      category: bucket?.name || 'Freie Verwendung',
+      kind,
+      costId: kind === 'budget' ? '' : cleanText(e.costId, ''),
+      bucketId: kind === 'budget' ? (bucket?.id || freeBucketId(buckets)) : '',
+      category: kind === 'budget' ? (bucket?.name || 'Freie Verwendung') : cleanText(e.category, 'Laufende Kosten'),
       amount: safeNumber(e.amount, 0),
       note,
-      date: normalizeDate(e.date)
+      date: normalizeDate(e.date),
+      merchant: cleanText(e.merchant, ''),
+      source: cleanText(e.source, ''),
+      sourceId: cleanText(e.sourceId, '')
     };
   });
 }
@@ -123,11 +154,14 @@ function migrate(raw = {}) {
   const d = {
     ...defaultData,
     ...raw,
-    fixedCosts: Array.isArray(raw.fixedCosts) ? raw.fixedCosts : [],
-    cancelableCosts: Array.isArray(raw.cancelableCosts) ? raw.cancelableCosts : [],
+    fixedCosts: (Array.isArray(raw.fixedCosts) ? raw.fixedCosts : []).map(x => cleanCost(x, x)),
+    cancelableCosts: (Array.isArray(raw.cancelableCosts) ? raw.cancelableCosts : []).map(x => cleanCost(x, x)),
     budgetBuckets: buckets,
     expenses: migrateExpenses(raw.expenses, buckets),
-    extraIncome: Array.isArray(raw.extraIncome) ? raw.extraIncome.map(x => ({ id: x.id || id(), name: cleanText(x.name, 'Plusgeld'), amount: safeNumber(x.amount, 0), date: normalizeDate(x.date), note: cleanText(x.note, '') })) : [],
+    extraIncome: Array.isArray(raw.extraIncome) ? raw.extraIncome.map(x => ({ ...x, id: x.id || id(), name: cleanText(x.name, 'Plusgeld'), amount: safeNumber(x.amount, 0), date: normalizeDate(x.date), note: cleanText(x.note, ''), source: cleanText(x.source, ''), sourceId: cleanText(x.sourceId, '') })) : [],
+    processedMailIds: Array.isArray(raw.processedMailIds) ? raw.processedMailIds.slice(-1000) : [],
+    mailImportLog: Array.isArray(raw.mailImportLog) ? raw.mailImportLog.slice(-100) : [],
+    statementImportLog: Array.isArray(raw.statementImportLog) ? raw.statementImportLog.slice(-100) : [],
     settings: { ...defaultData.settings, ...(raw.settings || {}) }
   };
   delete d.consumptionCategories;
@@ -143,10 +177,118 @@ function load() {
 }
 function save(data) { fs.writeFileSync(DB_PATH, JSON.stringify(migrate(data), null, 2)); }
 
-app.use(express.json({ limit: '300kb' }));
+function namedCostMatch(source, d) {
+  const rules = [
+    { all: ['ergo', 'rechtsschutz'], target: 'rechtsschutz' },
+    { all: ['ergo', 'hausrat'], target: 'hausrat' },
+    { all: ['ergo', 'unfall'], target: 'umfallversicherung' },
+    { all: ['ergo', 'haftpflicht'], target: 'privatversicherung' },
+    { any: ['latifaj', 'miete'], target: 'miete' },
+    { any: ['stadtwerke', 'gas'], target: 'gas' },
+    { any: ['telefonica', 'o2'], target: 'handyinternet' },
+    { any: ['schufa'], target: 'schufa' },
+    { any: ['cleverfit', 'cleverfitgmbh'], target: 'cleverfit' },
+    { any: ['discord'], target: 'discordnitro' },
+    { any: ['openai', 'chatgpt'], target: 'chatgpt' },
+    { any: ['googleone', 'gmail'], target: 'gmail' },
+    { any: ['iphone'], target: 'iphoneschulden' }
+  ];
+  const collections = ['fixedCosts', 'cancelableCosts'];
+  for (const rule of rules) {
+    const matches = rule.all ? rule.all.every(word => source.includes(word)) : rule.any.some(word => source.includes(word));
+    if (!matches) continue;
+    for (const type of collections) {
+      const item = d[type].find(x => normalizeName(x.name).includes(rule.target));
+      if (item) return { targetType: type, targetId: item.id, targetName: item.name };
+    }
+  }
+  for (const type of collections) {
+    const item = d[type].find(cost => {
+      const tokens = String(cost.name || '').toLowerCase().match(/[a-zäöüß0-9]{4,}/g) || [];
+      return tokens.some(token => source.includes(normalizeName(token)));
+    });
+    if (item) return { targetType: type, targetId: item.id, targetName: item.name };
+  }
+  return null;
+}
+
+function suggestTransactionTarget(tx, d) {
+  const source = normalizeName(`${tx.merchant || ''} ${tx.bookingType || ''} ${tx.details || ''}`);
+  const cost = namedCostMatch(source, d);
+  if (cost) return cost;
+  const bucket = findBestBucket({ merchant: tx.merchant, name: tx.merchant, note: tx.details }, d.budgetBuckets);
+  return { targetType: 'budget', targetId: bucket?.id || freeBucketId(d.budgetBuckets), targetName: bucket?.name || 'Freie Verwendung' };
+}
+
+function resolveExpenseTarget(targetType, targetId, tx, d) {
+  if (targetType === 'budget') {
+    const bucket = d.budgetBuckets.find(x => x.id === targetId);
+    if (bucket) return { kind: 'budget', bucketId: bucket.id, costId: '', category: bucket.name };
+  }
+  if (['fixedCosts', 'cancelableCosts'].includes(targetType)) {
+    const cost = d[targetType].find(x => x.id === targetId);
+    if (cost) return { kind: targetType, bucketId: '', costId: cost.id, category: cost.name };
+  }
+  const suggestion = suggestTransactionTarget(tx, d);
+  return resolveExpenseTarget(suggestion.targetType, suggestion.targetId, tx, d);
+}
+
+function importSparkasseTransaction(tx) {
+  const d = load();
+  if (!tx?.messageId || d.processedMailIds.includes(tx.messageId)) return false;
+
+  d.processedMailIds.push(tx.messageId);
+  d.processedMailIds = d.processedMailIds.slice(-1000);
+
+  if (tx.type === 'income') {
+    const amount = safeNumber(tx.amount, 0);
+    d.extraIncome.push({ id: id(), name: tx.merchant || 'Sparkassen-Geldeingang', amount, date: normalizeDate(tx.receivedAt), note: tx.subject || '', source: 'sparkasse-umsatzwecker', sourceId: tx.messageId });
+    d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'imported', direction: 'income', merchant: tx.merchant || '', amount });
+    d.mailImportLog = d.mailImportLog.slice(-100);
+    save(d);
+    console.log(`[Sparkasse-Mail] Eingang importiert: ${tx.merchant || 'Geldeingang'} ${amount.toFixed(2)} EUR`);
+    return true;
+  }
+
+  if (tx.type !== 'expense') {
+    d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'ignored', subject: tx.subject || '', reason: 'not-expense' });
+    d.mailImportLog = d.mailImportLog.slice(-100);
+    save(d);
+    return false;
+  }
+
+  const suggestion = suggestTransactionTarget(tx, d);
+  const target = resolveExpenseTarget(suggestion.targetType, suggestion.targetId, tx, d);
+  const amount = safeNumber(tx.amount, 0);
+
+  d.expenses.push({
+    id: id(),
+    ...target,
+    amount,
+    note: tx.merchant || 'Sparkassen-Umsatz',
+    merchant: tx.merchant || '',
+    date: normalizeDate(tx.receivedAt),
+    source: 'sparkasse-umsatzwecker',
+    sourceId: tx.messageId
+  });
+  d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'imported', merchant: tx.merchant || '', amount, target: target.category });
+  d.mailImportLog = d.mailImportLog.slice(-100);
+  save(d);
+  console.log(`[Sparkasse-Mail] Importiert: ${tx.merchant || 'Umsatz'} ${amount.toFixed(2)} EUR -> ${target.category}`);
+  return true;
+}
+
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+const statementUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 }
+});
+
 app.get('/api/data', (req, res) => res.json(load()));
+app.get('/api/mail-import-log', (req, res) => res.json(load().mailImportLog || []));
+app.get('/api/statement-import-log', (req, res) => res.json(load().statementImportLog || []));
 app.post('/api/income', (req, res) => { const d = load(); d.income = safeNumber(req.body.income, 0); save(d); res.json(d); });
 app.post('/api/settings', (req, res) => { const d = load(); d.settings = { ...d.settings, ...req.body }; save(d); res.json(d); });
 
@@ -154,7 +296,7 @@ app.post('/api/cost', (req, res) => {
   const d = load();
   const type = req.body.type;
   if (!['fixedCosts', 'cancelableCosts'].includes(type)) return res.status(400).json({ error: 'bad type' });
-  d[type].push({ id: id(), name: cleanText(req.body.name, 'Kosten'), amount: safeNumber(req.body.amount, 0) });
+  d[type].push(cleanCost({ id: id(), ...req.body }));
   save(d); res.json(d);
 });
 app.patch('/api/cost/:type/:id', (req, res) => {
@@ -163,8 +305,7 @@ app.patch('/api/cost/:type/:id', (req, res) => {
   if (!['fixedCosts', 'cancelableCosts'].includes(type)) return res.status(400).json({ error: 'bad type' });
   const item = d[type].find(x => x.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'not found' });
-  item.name = cleanText(req.body.name, item.name);
-  item.amount = safeNumber(req.body.amount, item.amount);
+  Object.assign(item, cleanCost(req.body, item));
   save(d); res.json(d);
 });
 app.delete('/api/cost/:type/:id', (req, res) => {
@@ -195,7 +336,6 @@ app.delete('/api/bucket/:id', (req, res) => {
   save(d); res.json(d);
 });
 
-// Old category endpoints are intentionally kept as harmless no-ops for older browsers/service workers.
 app.post('/api/category', (req, res) => res.json(load()));
 app.delete('/api/category/:name', (req, res) => res.json(load()));
 
@@ -207,17 +347,16 @@ app.post('/api/expense', (req, res) => {
   let amount = safeNumber(req.body.amount, 0);
   if (!amount && bucket?.mode === 'unit') amount = safeNumber(bucket.unitAmount, 0);
   if (d.settings.roundExpensesUp) amount = Math.ceil(amount);
-  d.expenses.push({ id: id(), kind: 'budget', bucketId: bucket.id, category: bucket.name, amount, note: cleanText(req.body.note, ''), date });
+  d.expenses.push({ id: id(), kind: 'budget', bucketId: bucket.id, category: bucket.name, amount, note: cleanText(req.body.note, ''), date, merchant: '', source: '', sourceId: '' });
   save(d); res.json(d);
 });
 app.patch('/api/expense/:id', (req, res) => {
   const d = load();
   const item = d.expenses.find(x => x.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'not found' });
-  const bucket = d.budgetBuckets.find(b => b.id === req.body.bucketId) || d.budgetBuckets.find(b => b.system === 'free_use' || b.id === 'bucket_frei') || d.budgetBuckets[0];
-  item.kind = 'budget';
-  item.bucketId = bucket.id;
-  item.category = bucket.name;
+  const targetType = req.body.targetType || 'budget';
+  const targetId = req.body.targetId || req.body.bucketId;
+  Object.assign(item, resolveExpenseTarget(targetType, targetId, item, d));
   item.amount = d.settings.roundExpensesUp ? Math.ceil(safeNumber(req.body.amount, item.amount)) : safeNumber(req.body.amount, item.amount);
   item.note = cleanText(req.body.note, item.note);
   item.date = normalizeDate(req.body.date || item.date);
@@ -242,5 +381,101 @@ app.patch('/api/extra-income/:id', (req, res) => {
 });
 app.delete('/api/extra-income/:id', (req, res) => { const d = load(); d.extraIncome = d.extraIncome.filter(x => x.id !== req.params.id); save(d); res.json(d); });
 
+app.post('/api/import/pdf/preview', statementUpload.single('statement'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Bitte eine Kontoauszug-PDF auswählen.' });
+    if (req.file.mimetype && req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'Es sind nur PDF-Dateien erlaubt.' });
+    const parsed = await parseSparkasseStatementPdf(req.file.buffer);
+    const d = load();
+    const knownIds = new Set([
+      ...d.expenses.map(x => x.sourceId).filter(Boolean),
+      ...d.extraIncome.map(x => x.sourceId).filter(Boolean)
+    ]);
+    const transactions = parsed.transactions.map(tx => {
+      const suggestion = tx.direction === 'expense' ? suggestTransactionTarget(tx, d) : { targetType: 'income', targetId: '', targetName: 'Einnahme' };
+      return { ...tx, ...suggestion, duplicate: knownIds.has(tx.sourceId) };
+    });
+    res.json({
+      statementId: parsed.statementId,
+      filename: req.file.originalname,
+      pages: parsed.pages,
+      transactions,
+      summary: {
+        expenses: transactions.filter(x => x.direction === 'expense').length,
+        income: transactions.filter(x => x.direction === 'income').length,
+        duplicates: transactions.filter(x => x.duplicate).length
+      }
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Die Kontoauszug-PDF konnte nicht gelesen werden.' });
+  }
+});
+
+app.post('/api/import/pdf/confirm', (req, res) => {
+  const rows = Array.isArray(req.body.transactions) ? req.body.transactions.slice(0, 500) : [];
+  if (!rows.length) return res.status(400).json({ error: 'Keine Buchungen zum Import ausgewählt.' });
+  const d = load();
+  const knownIds = new Set([
+    ...d.expenses.map(x => x.sourceId).filter(Boolean),
+    ...d.extraIncome.map(x => x.sourceId).filter(Boolean)
+  ]);
+  let imported = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    const sourceId = cleanText(row.sourceId, '');
+    const amount = Math.abs(safeNumber(row.amount, 0));
+    const date = normalizeOptionalDate(row.date);
+    const merchant = cleanText(row.merchant, 'Unbekannte Buchung').slice(0, 160);
+    const direction = row.direction === 'income' ? 'income' : 'expense';
+    if (!sourceId.startsWith('pdf:') || knownIds.has(sourceId) || !amount || !date) { skipped++; continue; }
+    if (direction === 'income') {
+      d.extraIncome.push({ id: id(), name: merchant, amount, date, note: cleanText(row.bookingType, ''), source: 'sparkasse-pdf', sourceId });
+    } else {
+      const target = resolveExpenseTarget(row.targetType, cleanText(row.targetId, ''), row, d);
+      d.expenses.push({ id: id(), ...target, amount, note: merchant, merchant, date, source: 'sparkasse-pdf', sourceId });
+    }
+    knownIds.add(sourceId);
+    imported++;
+  }
+  d.statementImportLog.push({ at: new Date().toISOString(), statementId: cleanText(req.body.statementId, ''), filename: cleanText(req.body.filename, ''), imported, skipped });
+  d.statementImportLog = d.statementImportLog.slice(-100);
+  save(d);
+  res.json({ data: load(), imported, skipped });
+});
+
+const sparkassePoller = createSparkasseMailPoller({
+  onTransaction: async tx => importSparkasseTransaction(tx),
+  onDebug: async info => {
+    const d = load();
+    if (info?.messageId && !d.processedMailIds.includes(info.messageId)) {
+      d.processedMailIds.push(info.messageId);
+      d.processedMailIds = d.processedMailIds.slice(-1000);
+      d.mailImportLog.push({ at: new Date().toISOString(), status: 'unparsed', ...info });
+      d.mailImportLog = d.mailImportLog.slice(-100);
+      save(d);
+    }
+  }
+});
+
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    const message = error.code === 'LIMIT_FILE_SIZE'
+      ? 'Die Kontoauszug-PDF darf höchstens 10 MB groß sein.'
+      : 'Der PDF-Upload ist fehlgeschlagen.';
+    return res.status(400).json({ error: message });
+  }
+  next(error);
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(PORT, '127.0.0.1', () => console.log(`Budget Master läuft intern auf http://127.0.0.1:${PORT}`));
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Budget Master läuft intern auf http://127.0.0.1:${PORT}`);
+  sparkassePoller.start();
+});
+
+async function shutdown() {
+  await sparkassePoller.stop();
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
