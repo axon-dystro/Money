@@ -1,4 +1,4 @@
-const CACHE='budget-master-v44';
+const CACHE='budget-master-v45';
 self.addEventListener('install',e=>{self.skipWaiting();});
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.map(k=>k!==CACHE?caches.delete(k):null))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{

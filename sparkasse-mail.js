@@ -1,5 +1,6 @@
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
+const { extractReferenceTokens } = require('./transaction-reconcile');
 
 function normalizeText(v = '') {
   return String(v).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -17,12 +18,21 @@ function parseGermanAmount(value) {
   return Number.isFinite(n) ? Math.abs(n) : null;
 }
 
+function parseTransactionDate(value) {
+  const text = normalizeText(value);
+  let m = text.match(/\b(\d{4})-(\d{2})-(\d{2})(?:[T\s]\d{1,2}:\d{2})?\b/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = text.match(/\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return '';
+}
+
 function parseUmsatzweckerMail(mail) {
   const subject = normalizeText(mail.subject || '');
   const text = normalizeText(mail.text || mail.html || '');
   const combined = `${subject} ${text}`;
 
-  if (!/sparkasse|umsatzwecker|kontowecker/i.test(combined)) return null;
+  if (!/sparkasse|umsatzwecker|kontowecker|kartenwecker/i.test(combined)) return null;
 
   const amountMatches = [...combined.matchAll(/([+-]?\d{1,3}(?:\.\d{3})*(?:,\d{2})|[+-]?\d+(?:,\d{2}))\s*(?:EUR|€)/gi)];
   const rawAmount = amountMatches.length ? amountMatches[amountMatches.length - 1][1] : '';
@@ -30,9 +40,13 @@ function parseUmsatzweckerMail(mail) {
   if (!amount || amount <= 0) return null;
 
   const incoming = /geldeingang|gutschrift|eingegangen|gutgeschrieben/i.test(combined);
-  const outgoing = /geldausgang|abbuchung|belastung|abgebucht|kartenzahlung|zahlung/i.test(combined) && !incoming;
+  const outgoing = /geldausgang|abbuchung|belastung|abgebucht|kartenzahlung|zahlung|bezahlt|bezahlen|einkauf|karteneinsatz|kartenwecker/i.test(combined) && !incoming;
+  const weckerType = /kartenwecker|sparkassen-card|sparkassen card|karteneinsatz|mit ihrer .*karte|mit ihrer .*card/i.test(combined)
+    ? 'card'
+    : 'turnover';
 
   const labelPatterns = [
+    /(?:bezahlt bei|bezahlen bei|einkauf bei|kartenzahlung bei|karteneinsatz bei)\s*([^|]{2,100}?)(?=\s+[+-]?\d+[.,]\d{2}\s*(?:EUR|€)|betrag|datum|iban|$)/i,
     /(?:zahlungsempf[aä]nger|empf[aä]nger|h[aä]ndler|zahlung bei|umsatz bei|verwendungszweck)\s*[:\-]\s*([^|]{2,100}?)(?=\s{2,}|betrag|datum|iban|$)/i,
     /(?:bei|an)\s+([A-ZÄÖÜ0-9][A-Za-zÄÖÜäöüß0-9 .,&'\-/]{2,80}?)(?=\s+[+-]?\d+[.,]\d{2}\s*(?:EUR|€)|$)/i
   ];
@@ -45,10 +59,13 @@ function parseUmsatzweckerMail(mail) {
 
   return {
     type: incoming ? 'income' : outgoing || /^\s*-/.test(rawAmount) ? 'expense' : 'unknown',
+    weckerType,
     amount,
     merchant: merchant.slice(0, 120),
     subject,
-    rawText: text.slice(0, 4000)
+    rawText: text.slice(0, 4000),
+    transactionDate: parseTransactionDate(combined),
+    sourceRefs: extractReferenceTokens(combined)
   };
 }
 

@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Budget Master</title>
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=44">
+  <link rel="stylesheet" href="/style.css?v=45">
 </head>
 <body>
 <main class="app-shell">
@@ -44,6 +44,8 @@
       <strong id="spentTop">0,00 €</strong>
     </article>
   </section>
+
+  <section id="alertPanel" class="alert-panel hidden" aria-live="polite"></section>
 
   <nav class="nav" aria-label="Hauptnavigation">
     <button class="active" data-view="dashboard" type="button">Dashboard</button>
@@ -121,6 +123,10 @@
     </article>
     <div id="reportSummary" class="report-table-wrap"></div>
     <article class="panel">
+      <div class="panel-head"><h3>Laufende Kosten</h3></div>
+      <div id="monthRunningCosts" class="report-table-wrap"></div>
+    </article>
+    <article class="panel">
       <div class="panel-head"><h3>Alle Ausgaben</h3></div>
       <div id="monthExpenses" class="list"></div>
     </article>
@@ -146,6 +152,7 @@
         </form>
         <label class="check-row"><input type="checkbox" id="hideFreeBalance"> Nicht verplantes Guthaben standardmäßig ausblenden</label>
         <label class="check-row"><input type="checkbox" id="roundExpensesUp"> Ausgaben automatisch aufrunden</label>
+        <label class="check-row"><input type="checkbox" id="costBufferEnabled"> Puffer bei Fixkosten aktiviert</label>
       </article>
 
       <article class="panel">
@@ -233,6 +240,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=44"></script>
+<script src="/app.js?v=45"></script>
 </body>
 </html>
