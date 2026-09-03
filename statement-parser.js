@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { extractReferenceTokens } = require('./transaction-reconcile');
 
 function parseGermanAmount(value) {
   const cleaned = String(value || '')
@@ -69,7 +70,8 @@ function parseSparkasseStatementText(text) {
       amount,
       merchant,
       bookingType,
-      details: normalizeText(details.join(' ')).slice(0, 500)
+      details: normalizeText(details.join(' ')).slice(0, 500),
+      sourceRefs: extractReferenceTokens(`${bookingType} ${merchant} ${details.join(' ')}`)
     };
   }).filter(Boolean);
 }

@@ -49,12 +49,27 @@ function monthExtra() { return (data.extraIncome || []).filter(e => dateMonth(e.
 function bucketBaseAmount(b) { return b.mode === 'unit' ? num(b.unitAmount) * num(b.unitCount) : num(b.amount); }
 function bucketBudget(b) { return monthlyEquivalent(bucketBaseAmount(b), b.frequency, b.dueDate); }
 function costBudget(c) { return monthlyEquivalent(c.amount, c.frequency, c.dueDate); }
+function costBufferEnabled() { return data.settings?.costBufferEnabled !== false; }
 function bucketName(id) { return (data.budgetBuckets || []).find(b => b.id === id)?.name || 'Freie Verwendung'; }
 function freeBucketId() { return (data.budgetBuckets || []).find(b => b.system === 'free_use' || b.id === 'bucket_frei')?.id || activeBuckets()[0]?.id || ''; }
 function transactionLabel(x) {
   if (x.kind === 'fixedCosts') return (data.fixedCosts || []).find(c => c.id === x.costId)?.name || x.category || 'Fixkosten';
   if (x.kind === 'cancelableCosts') return (data.cancelableCosts || []).find(c => c.id === x.costId)?.name || x.category || 'Kündbare Kosten';
   return bucketName(x.bucketId);
+}
+function actualPaidForCost(type, id) {
+  return monthExpenses().filter(e => e.kind === type && e.costId === id).reduce((total, e) => total + num(e.amount), 0);
+}
+function costStatus(type, item) {
+  const planned = costBudget(item);
+  const actual = actualPaidForCost(type, item.id);
+  const paid = actual > 0;
+  const due = planned > 0;
+  const effective = !costBufferEnabled() && paid ? actual : planned;
+  return { planned, actual, paid, due, effective, buffer: paid ? planned - actual : 0 };
+}
+function effectiveCostTotal(type) {
+  return (data[type] || []).reduce((total, item) => total + costStatus(type, item).effective, 0);
 }
 
 async function api(url, opt = {}) {
@@ -104,11 +119,15 @@ function bucketStatus(b) {
   return { periods, total, items, spentBy, p, availableNow, spentNow, spent, left, nextAllowance, unitsUsed };
 }
 function totals() {
-  const fixed = (data.fixedCosts || []).reduce((total, item) => total + costBudget(item), 0);
-  const cancel = (data.cancelableCosts || []).reduce((total, item) => total + costBudget(item), 0);
+  const fixed = effectiveCostTotal('fixedCosts');
+  const cancel = effectiveCostTotal('cancelableCosts');
+  const fixedPlanned = (data.fixedCosts || []).reduce((total, item) => total + costBudget(item), 0);
+  const cancelPlanned = (data.cancelableCosts || []).reduce((total, item) => total + costBudget(item), 0);
   const extra = sum(monthExtra());
   const totalIncome = num(data.income) + extra;
   const running = fixed + cancel;
+  const plannedRunning = fixedPlanned + cancelPlanned;
+  const releasedBuffer = costBufferEnabled() ? 0 : Math.max(0, plannedRunning - running);
   const reserved = activeBuckets().reduce((s, b) => s + bucketBudget(b), 0);
   const expenses = monthExpenses();
   const allSpent = sum(expenses);
@@ -116,7 +135,43 @@ function totals() {
   const unbucketed = expenses.filter(e => e.kind !== 'fixedCosts' && e.kind !== 'cancelableCosts').filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+num(e.amount),0);
   const overspend = activeBuckets().reduce((a,b)=>{ const st=bucketStatus(b); return a+Math.max(0,-st.left); },0);
   const unplanned = totalIncome - running - reserved - unbucketed - overspend;
-  return { fixed, cancel, extra, totalIncome, running, reserved, allSpent, unplanned };
+  return { fixed, cancel, fixedPlanned, cancelPlanned, extra, totalIncome, running, plannedRunning, releasedBuffer, reserved, allSpent, unplanned };
+}
+function reserveFloorForMonth() {
+  const now = new Date();
+  if (monthKey(now) !== monthKey(shownMonth)) return 0;
+  const period = currentPeriod(4);
+  return Math.max(1, 5 - period) * 50;
+}
+function renderWarnings(t) {
+  const target = q('#alertPanel');
+  if (!target) return;
+  const warnings = [];
+  const overdrawn = activeBuckets().map(b => ({ bucket: b, status: bucketStatus(b) })).filter(x => x.status.left < 0);
+  if (overdrawn.length) {
+    warnings.push({
+      level: 'danger',
+      title: 'Budgettopf überschritten',
+      text: overdrawn.map(x => `${x.bucket.name}: ${euro(Math.abs(x.status.left))} drüber`).join(' · ')
+    });
+  }
+  const floor = reserveFloorForMonth();
+  if (floor && t.unplanned < floor) {
+    warnings.push({
+      level: t.unplanned < 0 ? 'danger' : 'warn',
+      title: 'Reserve wird knapp',
+      text: `Für den aktuellen Monatsabschnitt wären mindestens ${euro(floor)} Reserve sinnvoll. Aktuell frei: ${euro(t.unplanned)}.`
+    });
+  }
+  if (!costBufferEnabled() && t.releasedBuffer > 0) {
+    warnings.push({
+      level: 'info',
+      title: 'Puffer ausgeschaltet',
+      text: `${euro(t.releasedBuffer)} geplanter Puffer aus bereits bezahlten Fixkosten ist wieder frei gerechnet.`
+    });
+  }
+  target.innerHTML = warnings.map(item => `<article class="alert-card ${item.level}"><b>${esc(item.title)}</b><span>${esc(item.text)}</span></article>`).join('');
+  target.classList.toggle('hidden', warnings.length === 0);
 }
 function moneyFlowRows(t) {
   return `
@@ -165,8 +220,10 @@ function render() {
   q('#incomeInput').value = String(data.income || '').replace('.', ',');
   q('#hideFreeBalance').checked = !!data.settings?.hideFreeBalance;
   q('#roundExpensesUp').checked = !!data.settings?.roundExpensesUp;
+  q('#costBufferEnabled').checked = costBufferEnabled();
 
   renderOptions();
+  renderWarnings(t);
   renderBuckets();
   renderLists();
   renderMonth();
@@ -216,7 +273,19 @@ function renderLists() {
   q('#monthExtraIncome').innerHTML = monthExtra().map(x => `<div class="row"><div><b>${esc(x.name)}</b><small>${formatDateInput(x.date)}</small></div><b>${euro(x.amount)}</b><button class="edit-btn" type="button" onclick="editExtraIncome('${x.id}')" aria-label="Plusgeld bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delExtraIncome('${x.id}')" aria-label="Plusgeld löschen">×</button></div>`).join('') || '<p class="empty-note">Kein Plusgeld in diesem Monat.</p>';
 }
 function costRows(arr, type) {
-  return arr.map(x => `<div class="row"><div><b>${esc(x.name)}</b><small>${euro(x.amount)} ${frequencyLabel(x.frequency)} · Monatsanteil ${euro(costBudget(x))}${x.frequency === 'one_time' && x.dueDate ? ` · fällig ${formatDateInput(x.dueDate)}` : ''}</small></div><b>${euro(costBudget(x))}</b><button class="edit-btn" type="button" onclick="editCost('${type}','${x.id}')" aria-label="Kosten bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delCost('${type}','${x.id}','${attr(x.name)}')" aria-label="Kosten löschen">×</button></div>`).join('') || '<p class="empty-note">Noch nichts eingetragen.</p>';
+  return arr.map(x => {
+    const status = costStatus(type, x);
+    const label = !status.due ? 'Nicht fällig' : status.paid ? '✓ bezahlt' : '× offen';
+    const cls = !status.due ? 'idle' : status.paid ? 'paid' : 'open';
+    const buffer = status.paid ? ` · Puffer ${status.buffer >= 0 ? '+' : '-'}${euro(Math.abs(status.buffer))}` : '';
+    return `<div class="row cost-row ${cls}">
+      <span class="paid-badge ${cls}">${esc(label)}</span>
+      <div><b>${esc(x.name)}</b><small>Geplant ${euro(status.planned)} · bezahlt ${euro(status.actual)}${buffer}${x.frequency === 'one_time' && x.dueDate ? ` · fällig ${formatDateInput(x.dueDate)}` : ` · ${frequencyLabel(x.frequency)}`}</small></div>
+      <b>${euro(status.effective)}</b>
+      <button class="edit-btn" type="button" onclick="editCost('${type}','${x.id}')" aria-label="Kosten bearbeiten">✎</button>
+      <button class="delete-btn" type="button" onclick="delCost('${type}','${x.id}','${attr(x.name)}')" aria-label="Kosten löschen">×</button>
+    </div>`;
+  }).join('') || '<p class="empty-note">Noch nichts eingetragen.</p>';
 }
 function expenseRow(x) {
   const bucket = transactionLabel(x);
@@ -234,7 +303,22 @@ function renderMonth() {
     return `<tr><td><b>${esc(b.name)}</b></td><td>${euro(s.total)}</td><td>${euro(s.spent)}</td><td class="${cls}">${diff >= 0 ? '+' : ''}${euro(diff)}</td><td>${esc(note)}</td></tr>`;
   }).join('');
   q('#reportSummary').innerHTML = `<table class="report-table"><thead><tr><th>Topf</th><th>Budget</th><th>Ausgegeben</th><th>Differenz</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+  renderMonthRunningCosts();
   q('#monthExpenses').innerHTML = [...monthExpenses()].sort((a, b) => parseDateInput(a.date).localeCompare(parseDateInput(b.date))).map(expenseRow).join('') || '<p class="empty-note">Noch keine Ausgaben.</p>';
+}
+function renderMonthRunningCosts() {
+  const rows = [
+    ...(data.fixedCosts || []).map(item => ({ type: 'fixedCosts', group: 'Fixkosten', item })),
+    ...(data.cancelableCosts || []).map(item => ({ type: 'cancelableCosts', group: 'Kündbar', item }))
+  ].map(({ type, group, item }) => {
+    const status = costStatus(type, item);
+    const label = !status.due ? 'Nicht fällig' : status.paid ? 'bezahlt' : 'offen';
+    const cls = !status.due ? '' : status.paid ? 'good-text' : 'bad-text';
+    return `<tr><td><span class="${cls}">${esc(label)}</span></td><td>${esc(group)}</td><td><b>${esc(item.name)}</b></td><td>${euro(status.planned)}</td><td>${euro(status.actual)}</td><td>${status.paid ? `${status.buffer >= 0 ? '+' : '-'}${euro(Math.abs(status.buffer))}` : '-'}</td><td>${euro(status.effective)}</td></tr>`;
+  }).join('');
+  q('#monthRunningCosts').innerHTML = rows
+    ? `<table class="report-table"><thead><tr><th>Status</th><th>Art</th><th>Name</th><th>Geplant</th><th>Bezahlt</th><th>Puffer</th><th>Rechnet</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<p class="empty-note">Noch keine laufenden Kosten eingetragen.</p>';
 }
 function catAbbr(name) { return String(name || 'T').split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase(); }
 function renderCalendar() {
@@ -462,17 +546,22 @@ function renderStatementPreview() {
   if (!preview) { target.classList.add('hidden'); target.innerHTML = ''; return; }
   const rows = preview.transactions.map((tx, index) => {
     const selected = `${tx.targetType}:${tx.targetId}`;
-    return `<tr data-import-index="${index}" class="${tx.duplicate ? 'duplicate-row' : ''}">
+    const statusText = tx.matchStatus === 'reconcile'
+      ? 'Wird mit vorhandener Kartenbuchung abgeglichen'
+      : tx.matchStatus === 'ambiguous'
+        ? 'Mehrdeutig, bitte nicht automatisch übernehmen'
+        : tx.duplicate ? 'Schon importiert' : '';
+    return `<tr data-import-index="${index}" class="${tx.duplicate ? 'duplicate-row' : ''} ${tx.matchStatus === 'reconcile' ? 'reconcile-row' : ''}">
       <td><input class="import-include" type="checkbox" ${tx.duplicate ? 'disabled' : 'checked'} aria-label="Buchung importieren"></td>
       <td><input class="import-date" type="date" value="${attr(tx.date)}"></td>
       <td><input class="import-merchant" value="${attr(tx.merchant)}"><small>${esc(tx.bookingType)}</small></td>
       <td><input class="import-amount" inputmode="decimal" value="${String(tx.amount).replace('.', ',')}"></td>
       <td><select class="import-direction" onchange="updateImportTarget(${index})"><option value="expense" ${tx.direction === 'expense' ? 'selected' : ''}>Ausgabe</option><option value="income" ${tx.direction === 'income' ? 'selected' : ''}>Einnahme</option></select></td>
-      <td><select class="import-target" ${tx.direction === 'income' ? 'disabled' : ''}>${targetOptionHtml(selected)}</select>${tx.duplicate ? '<small>Schon importiert</small>' : ''}</td>
+      <td><select class="import-target" ${tx.direction === 'income' ? 'disabled' : ''}>${targetOptionHtml(selected)}</select>${statusText ? `<small>${esc(statusText)}</small>` : ''}</td>
     </tr>`;
   }).join('');
   target.innerHTML = `
-    <div class="import-summary"><b>${preview.transactions.length} Buchungen erkannt</b><span>${preview.pages || '?'} Seiten · ${preview.summary.duplicates} bereits vorhanden</span></div>
+    <div class="import-summary"><b>${preview.transactions.length} Buchungen erkannt</b><span>${preview.pages || '?'} Seiten · ${preview.summary.duplicates} vorhanden · ${preview.summary.reconciled || 0} Abgleich · ${preview.summary.ambiguous || 0} mehrdeutig</span></div>
     <div class="import-table-wrap"><table class="import-table"><thead><tr><th>✓</th><th>Datum</th><th>Händler / Beschreibung</th><th>Betrag</th><th>Art</th><th>Zuordnung</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="import-actions"><button id="cancelStatementImport" type="button">Verwerfen</button><button id="confirmStatementImport" class="primary" type="button">Ausgewählte übernehmen</button></div>`;
   target.classList.remove('hidden');
@@ -511,6 +600,7 @@ async function confirmStatementImport() {
     const [targetType, targetId] = (row.querySelector('.import-target').value || 'budget:').split(':');
     return {
       sourceId: tx.sourceId, bookingType: tx.bookingType, details: tx.details,
+      sourceRefs: tx.sourceRefs || [],
       date: row.querySelector('.import-date').value,
       merchant: row.querySelector('.import-merchant').value,
       amount: num(row.querySelector('.import-amount').value), direction, targetType, targetId
@@ -528,7 +618,7 @@ async function confirmStatementImport() {
     render();
     renderStatementPreview();
     q('#statementFile').value = '';
-    setImportStatus(`${result.imported} Buchungen importiert${result.skipped ? `, ${result.skipped} übersprungen` : ''}.`, 'success');
+    setImportStatus(`${result.imported} Buchungen importiert${result.reconciled ? `, ${result.reconciled} abgeglichen` : ''}${result.skipped ? `, ${result.skipped} übersprungen` : ''}.`, 'success');
   } catch (error) {
     setImportStatus(error.message, 'error');
     q('#confirmStatementImport').disabled = false;
@@ -556,6 +646,7 @@ function wire() {
   q('#statementUploadForm').onsubmit = uploadStatement;
   q('#hideFreeBalance').onchange = e => api('/api/settings', { method: 'POST', body: JSON.stringify({ hideFreeBalance: e.target.checked }) });
   q('#roundExpensesUp').onchange = e => api('/api/settings', { method: 'POST', body: JSON.stringify({ roundExpensesUp: e.target.checked }) });
+  q('#costBufferEnabled').onchange = e => api('/api/settings', { method: 'POST', body: JSON.stringify({ costBufferEnabled: e.target.checked }) });
   q('#incomeForm').onsubmit = e => { e.preventDefault(); api('/api/income', { method: 'POST', body: JSON.stringify({ income: num(q('#incomeInput').value) }) }); };
   q('#expenseForm').onsubmit = e => {
     e.preventDefault();

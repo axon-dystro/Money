@@ -5,6 +5,14 @@ const multer = require('multer');
 const { createSparkasseMailPoller } = require('./sparkasse-mail');
 const { normalizeFrequency } = require('./recurrence');
 const { parseSparkasseStatementPdf } = require('./statement-parser');
+const {
+  appendImportSource,
+  extractReferenceTokens,
+  findExpenseImportMatch,
+  hasKnownSource,
+  isCardSource,
+  sourceIds
+} = require('./transaction-reconcile');
 const app = express();
 const PORT = process.env.PORT || 9999;
 const DB_PATH = path.join(__dirname, 'data.json');
@@ -27,7 +35,7 @@ const defaultData = {
   processedMailIds: [],
   mailImportLog: [],
   statementImportLog: [],
-  settings: { hideFreeBalance: true, roundExpensesUp: true }
+  settings: { hideFreeBalance: true, roundExpensesUp: true, costBufferEnabled: true }
 };
 
 function id() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -133,6 +141,14 @@ function migrateExpenses(rawExpenses, buckets) {
     if (movedToFree && originalCategory && normalizeName(originalCategory) !== normalizeName(bucket.name)) {
       note = note ? `${originalCategory} · ${note}` : originalCategory;
     }
+    const existingSourceIds = Array.isArray(e.sourceIds) ? e.sourceIds.filter(Boolean).map(String) : [];
+    if (e.sourceId && !existingSourceIds.includes(e.sourceId)) existingSourceIds.unshift(e.sourceId);
+    const existingRefs = Array.isArray(e.sourceRefs) ? e.sourceRefs.filter(Boolean).map(String) : [];
+    for (const ref of extractReferenceTokens(`${e.note || ''} ${e.merchant || ''} ${e.details || ''}`)) {
+      if (!existingRefs.includes(ref)) existingRefs.push(ref);
+    }
+    const source = cleanText(e.source, '');
+    const sourceStatus = cleanText(e.sourceStatus, isCardSource(source) ? 'pending' : (source ? 'cleared' : ''));
     return {
       ...e,
       id: e.id || id(),
@@ -144,8 +160,14 @@ function migrateExpenses(rawExpenses, buckets) {
       note,
       date: normalizeDate(e.date),
       merchant: cleanText(e.merchant, ''),
-      source: cleanText(e.source, ''),
-      sourceId: cleanText(e.sourceId, '')
+      source,
+      sourceId: cleanText(e.sourceId, ''),
+      sourceIds: existingSourceIds.slice(-12),
+      sourceRefs: existingRefs.slice(-20),
+      sourceStatus,
+      clearingSource: cleanText(e.clearingSource, ''),
+      clearedAt: cleanText(e.clearedAt, ''),
+      bookedDate: normalizeOptionalDate(e.bookedDate || '')
     };
   });
 }
@@ -186,11 +208,14 @@ function namedCostMatch(source, d) {
     { any: ['latifaj', 'miete'], target: 'miete' },
     { any: ['stadtwerke', 'gas'], target: 'gas' },
     { any: ['telefonica', 'o2'], target: 'handyinternet' },
+    { any: ['ard', 'zdf', 'deutschlandradio', 'rundfunkbeitrag', 'beitragsservice'], target: 'ard' },
     { any: ['schufa'], target: 'schufa' },
     { any: ['cleverfit', 'cleverfitgmbh'], target: 'cleverfit' },
     { any: ['discord'], target: 'discordnitro' },
     { any: ['openai', 'chatgpt'], target: 'chatgpt' },
     { any: ['googleone', 'gmail'], target: 'gmail' },
+    { any: ['crunchyroll', 'crunchy'], target: 'chrunchyrole' },
+    { any: ['spotify'], target: 'spotify' },
     { any: ['iphone'], target: 'iphoneschulden' }
   ];
   const collections = ['fixedCosts', 'cancelableCosts'];
@@ -233,6 +258,46 @@ function resolveExpenseTarget(targetType, targetId, tx, d) {
   return resolveExpenseTarget(suggestion.targetType, suggestion.targetId, tx, d);
 }
 
+function mailImportSource(tx = {}) {
+  return tx.weckerType === 'card' ? 'sparkasse-kartenwecker' : 'sparkasse-umsatzwecker';
+}
+
+function importDate(tx = {}) {
+  return normalizeOptionalDate(tx.transactionDate || tx.date || tx.bookingDate || '') || normalizeDate(tx.receivedAt);
+}
+
+function importedExpensePayload(tx = {}, source) {
+  return {
+    amount: safeNumber(tx.amount, 0),
+    merchant: cleanText(tx.merchant, ''),
+    note: cleanText(tx.merchant || tx.subject || 'Sparkassen-Umsatz', 'Sparkassen-Umsatz'),
+    date: importDate(tx),
+    source,
+    sourceId: cleanText(tx.messageId, ''),
+    sourceRefs: Array.isArray(tx.sourceRefs) ? tx.sourceRefs : extractReferenceTokens(`${tx.rawText || ''} ${tx.subject || ''}`)
+  };
+}
+
+function importedExpenseRowPayload(row = {}, source = 'sparkasse-pdf') {
+  const merchant = cleanText(row.merchant, 'Unbekannte Buchung').slice(0, 160);
+  return {
+    amount: Math.abs(safeNumber(row.amount, 0)),
+    merchant,
+    note: merchant,
+    date: normalizeOptionalDate(row.date),
+    source,
+    sourceId: cleanText(row.sourceId, ''),
+    sourceRefs: Array.isArray(row.sourceRefs) ? row.sourceRefs : extractReferenceTokens(`${row.bookingType || ''} ${row.details || ''} ${merchant}`)
+  };
+}
+
+function importMatchSummary(match) {
+  if (!match || match.action === 'none') return { duplicate: false, matchStatus: 'new', matchReason: '' };
+  if (match.action === 'duplicate') return { duplicate: true, matchStatus: 'duplicate', matchReason: match.reason || 'duplicate', matchedExpenseId: match.existing?.id || '' };
+  if (match.action === 'reconcile') return { duplicate: false, matchStatus: 'reconcile', matchReason: match.reason || 'match', matchedExpenseId: match.existing?.id || '' };
+  return { duplicate: true, matchStatus: 'ambiguous', matchReason: match.reason || 'ambiguous' };
+}
+
 function importSparkasseTransaction(tx) {
   const d = load();
   if (!tx?.messageId || d.processedMailIds.includes(tx.messageId)) return false;
@@ -242,7 +307,14 @@ function importSparkasseTransaction(tx) {
 
   if (tx.type === 'income') {
     const amount = safeNumber(tx.amount, 0);
-    d.extraIncome.push({ id: id(), name: tx.merchant || 'Sparkassen-Geldeingang', amount, date: normalizeDate(tx.receivedAt), note: tx.subject || '', source: 'sparkasse-umsatzwecker', sourceId: tx.messageId });
+    const knownIncome = hasKnownSource(d.extraIncome || [], tx.messageId);
+    if (knownIncome) {
+      d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'duplicate', direction: 'income', merchant: tx.merchant || '', amount });
+      d.mailImportLog = d.mailImportLog.slice(-100);
+      save(d);
+      return false;
+    }
+    d.extraIncome.push({ id: id(), name: tx.merchant || 'Sparkassen-Geldeingang', amount, date: importDate(tx), note: tx.subject || '', source: mailImportSource(tx), sourceId: tx.messageId, sourceIds: [tx.messageId], sourceRefs: Array.isArray(tx.sourceRefs) ? tx.sourceRefs : [] });
     d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'imported', direction: 'income', merchant: tx.merchant || '', amount });
     d.mailImportLog = d.mailImportLog.slice(-100);
     save(d);
@@ -257,21 +329,53 @@ function importSparkasseTransaction(tx) {
     return false;
   }
 
+  const source = mailImportSource(tx);
+  const incoming = importedExpensePayload(tx, source);
+  const match = findExpenseImportMatch(d.expenses, incoming);
+  const amount = safeNumber(tx.amount, 0);
+
+  if (match.action === 'duplicate') {
+    d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'duplicate', merchant: tx.merchant || '', amount, reason: match.reason || 'duplicate' });
+    d.mailImportLog = d.mailImportLog.slice(-100);
+    save(d);
+    console.log(`[Sparkasse-Mail] Duplikat übersprungen: ${tx.merchant || 'Umsatz'} ${amount.toFixed(2)} EUR`);
+    return false;
+  }
+
+  if (match.action === 'reconcile' && match.existing) {
+    appendImportSource(match.existing, incoming);
+    d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'reconciled', merchant: tx.merchant || '', amount, existingExpenseId: match.existing.id, reason: match.reason || 'match' });
+    d.mailImportLog = d.mailImportLog.slice(-100);
+    save(d);
+    console.log(`[Sparkasse-Mail] Mit bestehender Buchung abgeglichen: ${tx.merchant || 'Umsatz'} ${amount.toFixed(2)} EUR`);
+    return false;
+  }
+
+  if (match.action === 'ambiguous') {
+    d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'ambiguous', merchant: tx.merchant || '', amount, reason: match.reason || 'ambiguous' });
+    d.mailImportLog = d.mailImportLog.slice(-100);
+    save(d);
+    console.warn(`[Sparkasse-Mail] Mehrdeutiger Abgleich, nicht automatisch importiert: ${tx.merchant || 'Umsatz'} ${amount.toFixed(2)} EUR`);
+    return false;
+  }
+
   const suggestion = suggestTransactionTarget(tx, d);
   const target = resolveExpenseTarget(suggestion.targetType, suggestion.targetId, tx, d);
-  const amount = safeNumber(tx.amount, 0);
 
   d.expenses.push({
     id: id(),
     ...target,
     amount,
-    note: tx.merchant || 'Sparkassen-Umsatz',
-    merchant: tx.merchant || '',
-    date: normalizeDate(tx.receivedAt),
-    source: 'sparkasse-umsatzwecker',
-    sourceId: tx.messageId
+    note: incoming.note,
+    merchant: incoming.merchant,
+    date: incoming.date,
+    source,
+    sourceId: tx.messageId,
+    sourceIds: sourceIds(incoming),
+    sourceRefs: incoming.sourceRefs || [],
+    sourceStatus: isCardSource(source) ? 'pending' : 'cleared'
   });
-  d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'imported', merchant: tx.merchant || '', amount, target: target.category });
+  d.mailImportLog.push({ at: new Date().toISOString(), messageId: tx.messageId, status: 'imported', merchant: tx.merchant || '', amount, target: target.category, source });
   d.mailImportLog = d.mailImportLog.slice(-100);
   save(d);
   console.log(`[Sparkasse-Mail] Importiert: ${tx.merchant || 'Umsatz'} ${amount.toFixed(2)} EUR -> ${target.category}`);
@@ -387,13 +491,16 @@ app.post('/api/import/pdf/preview', statementUpload.single('statement'), async (
     if (req.file.mimetype && req.file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'Es sind nur PDF-Dateien erlaubt.' });
     const parsed = await parseSparkasseStatementPdf(req.file.buffer);
     const d = load();
-    const knownIds = new Set([
-      ...d.expenses.map(x => x.sourceId).filter(Boolean),
-      ...d.extraIncome.map(x => x.sourceId).filter(Boolean)
-    ]);
+    const usedExpenseIds = new Set();
     const transactions = parsed.transactions.map(tx => {
       const suggestion = tx.direction === 'expense' ? suggestTransactionTarget(tx, d) : { targetType: 'income', targetId: '', targetName: 'Einnahme' };
-      return { ...tx, ...suggestion, duplicate: knownIds.has(tx.sourceId) };
+      if (tx.direction !== 'expense') {
+        const duplicate = !!hasKnownSource(d.extraIncome || [], tx.sourceId);
+        return { ...tx, ...suggestion, duplicate, matchStatus: duplicate ? 'duplicate' : 'new', matchReason: duplicate ? 'source-id' : '' };
+      }
+      const match = findExpenseImportMatch(d.expenses, importedExpenseRowPayload(tx), { usedExistingIds: usedExpenseIds });
+      if (match.action === 'reconcile' && match.existing?.id) usedExpenseIds.add(match.existing.id);
+      return { ...tx, ...suggestion, ...importMatchSummary(match) };
     });
     res.json({
       statementId: parsed.statementId,
@@ -403,7 +510,9 @@ app.post('/api/import/pdf/preview', statementUpload.single('statement'), async (
       summary: {
         expenses: transactions.filter(x => x.direction === 'expense').length,
         income: transactions.filter(x => x.direction === 'income').length,
-        duplicates: transactions.filter(x => x.duplicate).length
+        duplicates: transactions.filter(x => x.duplicate).length,
+        reconciled: transactions.filter(x => x.matchStatus === 'reconcile').length,
+        ambiguous: transactions.filter(x => x.matchStatus === 'ambiguous').length
       }
     });
   } catch (error) {
@@ -415,32 +524,48 @@ app.post('/api/import/pdf/confirm', (req, res) => {
   const rows = Array.isArray(req.body.transactions) ? req.body.transactions.slice(0, 500) : [];
   if (!rows.length) return res.status(400).json({ error: 'Keine Buchungen zum Import ausgewählt.' });
   const d = load();
-  const knownIds = new Set([
-    ...d.expenses.map(x => x.sourceId).filter(Boolean),
-    ...d.extraIncome.map(x => x.sourceId).filter(Boolean)
+  const knownIncomeIds = new Set([
+    ...d.extraIncome.map(x => x.sourceId).filter(Boolean),
+    ...d.extraIncome.flatMap(x => Array.isArray(x.sourceIds) ? x.sourceIds : []).filter(Boolean)
   ]);
+  const usedExpenseIds = new Set();
   let imported = 0;
   let skipped = 0;
+  let reconciled = 0;
+  let ambiguous = 0;
   for (const row of rows) {
-    const sourceId = cleanText(row.sourceId, '');
-    const amount = Math.abs(safeNumber(row.amount, 0));
-    const date = normalizeOptionalDate(row.date);
-    const merchant = cleanText(row.merchant, 'Unbekannte Buchung').slice(0, 160);
+    const incoming = importedExpenseRowPayload(row);
+    const sourceId = incoming.sourceId;
+    const amount = incoming.amount;
+    const date = incoming.date;
+    const merchant = incoming.merchant;
     const direction = row.direction === 'income' ? 'income' : 'expense';
-    if (!sourceId.startsWith('pdf:') || knownIds.has(sourceId) || !amount || !date) { skipped++; continue; }
+    if (!sourceId.startsWith('pdf:') || !amount || !date) { skipped++; continue; }
     if (direction === 'income') {
+      if (knownIncomeIds.has(sourceId)) { skipped++; continue; }
       d.extraIncome.push({ id: id(), name: merchant, amount, date, note: cleanText(row.bookingType, ''), source: 'sparkasse-pdf', sourceId });
+      knownIncomeIds.add(sourceId);
     } else {
+      const match = findExpenseImportMatch(d.expenses, incoming, { usedExistingIds: usedExpenseIds });
+      if (match.action === 'duplicate') { skipped++; continue; }
+      if (match.action === 'ambiguous') { ambiguous++; skipped++; continue; }
+      if (match.action === 'reconcile' && match.existing) {
+        appendImportSource(match.existing, incoming);
+        usedExpenseIds.add(match.existing.id);
+        reconciled++;
+        continue;
+      }
       const target = resolveExpenseTarget(row.targetType, cleanText(row.targetId, ''), row, d);
-      d.expenses.push({ id: id(), ...target, amount, note: merchant, merchant, date, source: 'sparkasse-pdf', sourceId });
+      const expenseId = id();
+      d.expenses.push({ id: expenseId, ...target, amount, note: merchant, merchant, date, source: 'sparkasse-pdf', sourceId, sourceIds: [sourceId], sourceRefs: incoming.sourceRefs || [], sourceStatus: 'cleared' });
+      usedExpenseIds.add(expenseId);
     }
-    knownIds.add(sourceId);
     imported++;
   }
-  d.statementImportLog.push({ at: new Date().toISOString(), statementId: cleanText(req.body.statementId, ''), filename: cleanText(req.body.filename, ''), imported, skipped });
+  d.statementImportLog.push({ at: new Date().toISOString(), statementId: cleanText(req.body.statementId, ''), filename: cleanText(req.body.filename, ''), imported, reconciled, skipped, ambiguous });
   d.statementImportLog = d.statementImportLog.slice(-100);
   save(d);
-  res.json({ data: load(), imported, skipped });
+  res.json({ data: load(), imported, reconciled, skipped, ambiguous });
 });
 
 const sparkassePoller = createSparkasseMailPoller({
