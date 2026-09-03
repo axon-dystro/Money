@@ -22,6 +22,7 @@ Ihre Sparkasse`
   assert.equal(tx.weckerType, 'turnover');
   assert.equal(tx.amount, 2.97);
   assert.equal(tx.merchant, 'HIT SAGT');
+  assert.equal(tx.balance, 1593.95);
 });
 
 test('parses another Sparkasse Umsatzwecker line with abbreviated merchant', () => {

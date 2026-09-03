@@ -71,6 +71,16 @@ function costStatus(type, item) {
 function effectiveCostTotal(type) {
   return (data[type] || []).reduce((total, item) => total + costStatus(type, item).effective, 0);
 }
+function openCostTotal(type) {
+  return (data[type] || []).reduce((total, item) => {
+    const status = costStatus(type, item);
+    return total + (status.due && !status.paid ? status.effective : 0);
+  }, 0);
+}
+function currentBalanceValue() {
+  const value = Number(data.settings?.currentBalance);
+  return Number.isFinite(value) ? value : null;
+}
 
 async function api(url, opt = {}) {
   const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opt });
@@ -121,6 +131,8 @@ function bucketStatus(b) {
 function totals() {
   const fixed = effectiveCostTotal('fixedCosts');
   const cancel = effectiveCostTotal('cancelableCosts');
+  const openFixed = openCostTotal('fixedCosts');
+  const openCancel = openCostTotal('cancelableCosts');
   const fixedPlanned = (data.fixedCosts || []).reduce((total, item) => total + costBudget(item), 0);
   const cancelPlanned = (data.cancelableCosts || []).reduce((total, item) => total + costBudget(item), 0);
   const extra = sum(monthExtra());
@@ -135,13 +147,17 @@ function totals() {
   const unbucketed = expenses.filter(e => e.kind !== 'fixedCosts' && e.kind !== 'cancelableCosts').filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+num(e.amount),0);
   const overspend = activeBuckets().reduce((a,b)=>{ const st=bucketStatus(b); return a+Math.max(0,-st.left); },0);
   const unplanned = totalIncome - running - reserved - unbucketed - overspend;
-  return { fixed, cancel, fixedPlanned, cancelPlanned, extra, totalIncome, running, plannedRunning, releasedBuffer, reserved, allSpent, unplanned };
+  const currentBalance = currentBalanceValue();
+  const openRunning = openFixed + openCancel;
+  const realAvailable = currentBalance === null ? unplanned : currentBalance - openRunning - reserved - overspend;
+  const openAndReserved = openRunning + reserved;
+  return { fixed, cancel, openFixed, openCancel, fixedPlanned, cancelPlanned, extra, totalIncome, currentBalance, openRunning, openAndReserved, running, plannedRunning, releasedBuffer, reserved, allSpent, unplanned, realAvailable };
 }
 function reserveFloorForMonth() {
   const now = new Date();
   if (monthKey(now) !== monthKey(shownMonth)) return 0;
-  const period = currentPeriod(4);
-  return Math.max(1, 5 - period) * 50;
+  const configured = Number(data.settings?.reserveFloor);
+  return Number.isFinite(configured) && configured > 0 ? configured : 200;
 }
 function renderWarnings(t) {
   const target = q('#alertPanel');
@@ -156,11 +172,18 @@ function renderWarnings(t) {
     });
   }
   const floor = reserveFloorForMonth();
-  if (floor && t.unplanned < floor) {
+  if (floor && t.currentBalance !== null && t.currentBalance < floor && t.openRunning <= 0) {
     warnings.push({
-      level: t.unplanned < 0 ? 'danger' : 'warn',
-      title: 'Reserve wird knapp',
-      text: `Für den aktuellen Monatsabschnitt wären mindestens ${euro(floor)} Reserve sinnvoll. Aktuell frei: ${euro(t.unplanned)}.`
+      level: t.currentBalance < 0 ? 'danger' : 'warn',
+      title: 'Kontoreserve wird knapp',
+      text: `Dein aktueller Saldo liegt bei ${euro(t.currentBalance)}. Deine Mindestreserve ist ${euro(floor)}.`
+    });
+  }
+  if (t.currentBalance !== null && t.openRunning > 0 && t.currentBalance - t.openRunning < 0) {
+    warnings.push({
+      level: 'danger',
+      title: 'Offene Kosten nicht gedeckt',
+      text: `Aktueller Saldo ${euro(t.currentBalance)}, noch offene Fix/kündbare Kosten ${euro(t.openRunning)}.`
     });
   }
   if (!costBufferEnabled() && t.releasedBuffer > 0) {
@@ -175,11 +198,11 @@ function renderWarnings(t) {
 }
 function moneyFlowRows(t) {
   return `
-    <div class="flow-row"><span>Einnahmen</span><b>${euro(t.totalIncome)}</b></div>
-    <div class="flow-row"><span>Fixkosten</span><b>-${euro(t.fixed)}</b></div>
-    <div class="flow-row"><span>Kündbar</span><b>-${euro(t.cancel)}</b></div>
+    <div class="flow-row"><span>Aktueller Saldo</span><b>${t.currentBalance === null ? 'nicht gesetzt' : euro(t.currentBalance)}</b></div>
+    <div class="flow-row"><span>Offene Fixkosten</span><b>-${euro(t.openFixed)}</b></div>
+    <div class="flow-row"><span>Offen kündbar</span><b>-${euro(t.openCancel)}</b></div>
     <div class="flow-row"><span>Budget-Töpfe</span><b>-${euro(t.reserved)}</b></div>
-    <div class="flow-row total"><span>Nicht verplant</span><b>${balanceVisible ? euro(t.unplanned) : '•••• €'}</b></div>`;
+    <div class="flow-row total"><span>Verfügbar</span><b>${balanceVisible ? euro(t.realAvailable) : '•••• €'}</b></div>`;
 }
 function bucketCardHtml(b, compact = false) {
   const s = bucketStatus(b);
@@ -203,7 +226,7 @@ function bucketCardHtml(b, compact = false) {
 }
 function moneyFlowCardHtml() {
   return `<article class="bucket-card flow-card">
-    <div class="bucket-top"><h3>Geldfluss</h3><b>${balanceVisible ? euro(totals().unplanned) : '•••• €'}</b></div>
+    <div class="bucket-top"><h3>Geldfluss</h3><b>${balanceVisible ? euro(totals().realAvailable) : '•••• €'}</b></div>
     <div class="flow compact-flow">${moneyFlowRows(totals())}</div>
   </article>`;
 }
@@ -211,13 +234,15 @@ function moneyFlowCardHtml() {
 function render() {
   if (!data) return;
   const t = totals();
-  q('#freeAmount').textContent = balanceVisible ? euro(t.unplanned) : '•••• €';
+  q('#freeAmount').textContent = balanceVisible ? euro(t.realAvailable) : '•••• €';
   q('#toggleBalance').textContent = balanceVisible ? '🙈' : '👁';
-  q('#incomeTop').textContent = euro(t.totalIncome);
+  q('#incomeTop').textContent = t.currentBalance === null ? euro(t.totalIncome) : euro(t.currentBalance);
   q('#reservedTop').textContent = euro(t.reserved);
-  q('#runningTop').textContent = euro(t.running);
+  q('#runningTop').textContent = euro(t.openAndReserved);
   q('#spentTop').textContent = euro(t.allSpent);
   q('#incomeInput').value = String(data.income || '').replace('.', ',');
+  q('#currentBalanceInput').value = t.currentBalance === null ? '' : String(t.currentBalance).replace('.', ',');
+  q('#reserveFloorInput').value = String(data.settings?.reserveFloor || 200).replace('.', ',');
   q('#hideFreeBalance').checked = !!data.settings?.hideFreeBalance;
   q('#roundExpensesUp').checked = !!data.settings?.roundExpensesUp;
   q('#costBufferEnabled').checked = costBufferEnabled();
@@ -232,7 +257,7 @@ function render() {
 }
 
 function renderOptions() {
-  q('#expenseBucket').innerHTML = activeBuckets().map(b => `<option value="${attr(b.id)}">${esc(b.name)}</option>`).join('');
+  q('#expenseTarget').innerHTML = targetOptionHtml(`budget:${freeBucketId()}`);
 }
 
 function renderBuckets() {
@@ -354,7 +379,7 @@ function renderPrintReport() {
       <div class="print-kpi"><span>Einnahmen</span><strong>${euro(t.totalIncome)}</strong></div>
       <div class="print-kpi"><span>Fix + kündbar</span><strong>${euro(t.running)}</strong></div>
       <div class="print-kpi"><span>Reserviert</span><strong>${euro(t.reserved)}</strong></div>
-      <div class="print-kpi"><span>Nicht verplant</span><strong>${euro(t.unplanned)}</strong></div>
+      <div class="print-kpi"><span>Verfügbar</span><strong>${euro(t.realAvailable)}</strong></div>
     </section>
     <section class="print-section"><h2>Budget-Töpfe</h2><table class="print-table"><thead><tr><th>Topf</th><th>Budget</th><th>Ausgegeben</th><th>Differenz</th><th>Nutzung</th></tr></thead><tbody>${bucketRows}</tbody></table></section>
     <section class="print-section"><h2>Ausgabenliste</h2><table class="print-table"><thead><tr><th>Datum</th><th>Budget-Topf</th><th>Notiz</th><th>Betrag</th></tr></thead><tbody>${expenseRows}</tbody></table></section>
@@ -648,9 +673,12 @@ function wire() {
   q('#roundExpensesUp').onchange = e => api('/api/settings', { method: 'POST', body: JSON.stringify({ roundExpensesUp: e.target.checked }) });
   q('#costBufferEnabled').onchange = e => api('/api/settings', { method: 'POST', body: JSON.stringify({ costBufferEnabled: e.target.checked }) });
   q('#incomeForm').onsubmit = e => { e.preventDefault(); api('/api/income', { method: 'POST', body: JSON.stringify({ income: num(q('#incomeInput').value) }) }); };
+  q('#balanceForm').onsubmit = e => { e.preventDefault(); api('/api/settings', { method: 'POST', body: JSON.stringify({ currentBalance: num(q('#currentBalanceInput').value) }) }); };
+  q('#reserveForm').onsubmit = e => { e.preventDefault(); api('/api/settings', { method: 'POST', body: JSON.stringify({ reserveFloor: num(q('#reserveFloorInput').value) || 200 }) }); };
   q('#expenseForm').onsubmit = e => {
     e.preventDefault();
-    api('/api/expense', { method: 'POST', body: JSON.stringify({ bucketId: q('#expenseBucket').value || freeBucketId(), amount: num(q('#expenseAmount').value), date: q('#expenseDate').value, note: q('#expenseNote').value }) });
+    const [targetType, targetId] = (q('#expenseTarget').value || `budget:${freeBucketId()}`).split(':');
+    api('/api/expense', { method: 'POST', body: JSON.stringify({ targetType, targetId, amount: num(q('#expenseAmount').value), date: q('#expenseDate').value, note: q('#expenseNote').value }) });
     q('#expenseAmount').value = '';
     q('#expenseNote').value = '';
     setTimeout(() => q('#expenseAmount')?.focus(), 200);

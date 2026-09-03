@@ -35,7 +35,7 @@ const defaultData = {
   processedMailIds: [],
   mailImportLog: [],
   statementImportLog: [],
-  settings: { hideFreeBalance: true, roundExpensesUp: true, costBufferEnabled: true }
+  settings: { hideFreeBalance: true, roundExpensesUp: true, costBufferEnabled: true, currentBalance: null, reserveFloor: 200 }
 };
 
 function id() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -304,6 +304,7 @@ function importSparkasseTransaction(tx) {
 
   d.processedMailIds.push(tx.messageId);
   d.processedMailIds = d.processedMailIds.slice(-1000);
+  if (Number.isFinite(Number(tx.balance))) d.settings.currentBalance = safeNumber(tx.balance, d.settings.currentBalance);
 
   if (tx.type === 'income') {
     const amount = safeNumber(tx.amount, 0);
@@ -446,12 +447,17 @@ app.delete('/api/category/:name', (req, res) => res.json(load()));
 app.post('/api/expense', (req, res) => {
   const d = load();
   const date = normalizeDate(req.body.date);
-  let bucket = d.budgetBuckets.find(b => b.id === req.body.bucketId);
-  if (!bucket) bucket = d.budgetBuckets.find(b => b.system === 'free_use' || b.id === 'bucket_frei') || d.budgetBuckets[0];
+  const targetType = req.body.targetType || 'budget';
+  const targetId = req.body.targetId || req.body.bucketId;
   let amount = safeNumber(req.body.amount, 0);
+  const bucket = d.budgetBuckets.find(b => b.id === targetId) || d.budgetBuckets.find(b => b.system === 'free_use' || b.id === 'bucket_frei') || d.budgetBuckets[0];
   if (!amount && bucket?.mode === 'unit') amount = safeNumber(bucket.unitAmount, 0);
   if (d.settings.roundExpensesUp) amount = Math.ceil(amount);
-  d.expenses.push({ id: id(), kind: 'budget', bucketId: bucket.id, category: bucket.name, amount, note: cleanText(req.body.note, ''), date, merchant: '', source: '', sourceId: '' });
+  const target = resolveExpenseTarget(targetType, targetId, {
+    bucketId: bucket?.id,
+    category: bucket?.name || 'Freie Verwendung'
+  }, d);
+  d.expenses.push({ id: id(), ...target, amount, note: cleanText(req.body.note, ''), date, merchant: '', source: 'manual', sourceId: '' });
   save(d); res.json(d);
 });
 app.patch('/api/expense/:id', (req, res) => {

@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Budget Master</title>
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=45">
+  <link rel="stylesheet" href="/style.css?v=46">
 </head>
 <body>
 <main class="app-shell">
@@ -23,16 +23,16 @@
 
   <section class="summary-panel" aria-label="Monatszusammenfassung">
     <article class="summary-main">
-      <span>Nicht verplant</span>
+      <span>Verfügbar</span>
       <strong id="freeAmount">0,00 €</strong>
-      <small>Geld außerhalb aller Budget-Töpfe.</small>
+      <small>Saldo minus offene Kosten und reservierte Töpfe.</small>
     </article>
     <article>
-      <span>Einnahmen</span>
+      <span>Aktueller Saldo</span>
       <strong id="incomeTop">0,00 €</strong>
     </article>
     <article>
-      <span>Fix + kündbar</span>
+      <span>Offen + reserviert</span>
       <strong id="runningTop">0,00 €</strong>
     </article>
     <article>
@@ -78,12 +78,12 @@
     <div class="section-head left-only">
       <div>
         <h2>Schnell eintragen</h2>
-        <p>Nur Budget-Topf wählen, Betrag eintragen und speichern. Der Zweck gehört in die Notiz.</p>
+      <p>Budget-Topf, Fixkosten oder kündbare Kosten wählen. Der Zweck gehört in die Notiz.</p>
       </div>
     </div>
     <div id="quickBudgetOverview" class="quick-budget-overview" aria-label="Budgetstatus"></div>
     <form id="expenseForm" class="form-panel quick-entry-panel">
-      <label>Budget-Topf<select id="expenseBucket"></select></label>
+      <label>Zuordnung<select id="expenseTarget"></select></label>
       <label>Betrag<input id="expenseAmount" inputmode="decimal" placeholder="z. B. 12,50"></label>
       <label>Datum<input id="expenseDate" type="date" autocomplete="off" ></label>
       <label class="wide">Notiz<input id="expenseNote" placeholder="z. B. Aldi, Steam-Spiel, Döner"></label>
@@ -149,6 +149,14 @@
         <form id="incomeForm" class="inline-form">
           <input id="incomeInput" inputmode="decimal" placeholder="Einkommen netto">
           <button class="primary" type="submit">Speichern</button>
+        </form>
+        <form id="balanceForm" class="inline-form">
+          <input id="currentBalanceInput" inputmode="decimal" placeholder="Aktueller Saldo">
+          <button class="primary" type="submit">Saldo speichern</button>
+        </form>
+        <form id="reserveForm" class="inline-form">
+          <input id="reserveFloorInput" inputmode="decimal" placeholder="Mindestreserve, z. B. 200">
+          <button class="primary" type="submit">Reserve speichern</button>
         </form>
         <label class="check-row"><input type="checkbox" id="hideFreeBalance"> Nicht verplantes Guthaben standardmäßig ausblenden</label>
         <label class="check-row"><input type="checkbox" id="roundExpensesUp"> Ausgaben automatisch aufrunden</label>
@@ -240,6 +248,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=45"></script>
+<script src="/app.js?v=46"></script>
 </body>
 </html>

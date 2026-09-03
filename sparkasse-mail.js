@@ -16,6 +16,13 @@ function parseGermanAmount(value) {
   return Number.isFinite(n) ? Math.abs(n) : null;
 }
 
+function parseSignedGermanAmount(value) {
+  if (!value) return null;
+  const sign = /^\s*-/.test(String(value)) ? -1 : 1;
+  const amount = parseGermanAmount(value);
+  return amount === null ? null : sign * amount;
+}
+
 function parseTransactionDate(value) {
   const text = normalizeText(value);
   let m = text.match(/\b(\d{4})-(\d{2})-(\d{2})(?:[T\s]\d{1,2}:\d{2})?\b/);
@@ -81,6 +88,12 @@ function extractTransactionAmountAndMerchant(subject, text, combined) {
   };
 }
 
+function extractBalance(value) {
+  const text = normalizeText(value);
+  const match = text.match(/neuer\s+saldo\s*:\s*([+-]?\d{1,3}(?:\.\d{3})*(?:,\d{2})|[+-]?\d+(?:,\d{2}))\s*(?:EUR|€)/i);
+  return match ? parseSignedGermanAmount(match[1]) : null;
+}
+
 function parseUmsatzweckerMail(mail) {
   const subject = normalizeText(mail.subject || '');
   const rawBody = String(mail.text || mail.html || '');
@@ -121,6 +134,7 @@ function parseUmsatzweckerMail(mail) {
     subject,
     rawText: text.slice(0, 4000),
     transactionDate: parseTransactionDate(combined),
+    balance: extractBalance(combined),
     sourceRefs: extractReferenceTokens(combined)
   };
 }
