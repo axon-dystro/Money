@@ -61,12 +61,13 @@ function actualPaidForCost(type, id) {
   return monthExpenses().filter(e => e.kind === type && e.costId === id).reduce((total, e) => total + num(e.amount), 0);
 }
 function costStatus(type, item) {
+  const active = item.active !== false;
   const planned = costBudget(item);
   const actual = actualPaidForCost(type, item.id);
   const paid = actual > 0;
-  const due = planned > 0;
-  const effective = !costBufferEnabled() && paid ? actual : planned;
-  return { planned, actual, paid, due, effective, buffer: paid ? planned - actual : 0 };
+  const due = active && planned > 0;
+  const effective = !active ? 0 : !costBufferEnabled() && paid ? actual : planned;
+  return { active, planned, actual, paid, due, effective, buffer: paid ? planned - actual : 0 };
 }
 function effectiveCostTotal(type) {
   return (data[type] || []).reduce((total, item) => total + costStatus(type, item).effective, 0);
@@ -80,6 +81,20 @@ function openCostTotal(type) {
 function currentBalanceValue() {
   const value = Number(data.settings?.currentBalance);
   return Number.isFinite(value) ? value : null;
+}
+function planTotals() {
+  const planIncome = num(data.income) + sum(monthExtra());
+  const plannedFixed = (data.fixedCosts || []).filter(x => x.active !== false).reduce((total, item) => total + costBudget(item), 0);
+  const plannedCancel = (data.cancelableCosts || []).filter(x => x.active !== false).reduce((total, item) => total + costBudget(item), 0);
+  const reserved = activeBuckets().reduce((s, b) => s + bucketBudget(b), 0);
+  return {
+    planIncome,
+    plannedFixed,
+    plannedCancel,
+    reserved,
+    afterCosts: planIncome - plannedFixed - plannedCancel,
+    afterEverything: planIncome - plannedFixed - plannedCancel - reserved
+  };
 }
 
 async function api(url, opt = {}) {
@@ -297,21 +312,34 @@ function renderLists() {
   q('#fixedList').innerHTML = costRows(data.fixedCosts || [], 'fixedCosts');
   q('#cancelList').innerHTML = costRows(data.cancelableCosts || [], 'cancelableCosts');
   q('#monthExtraIncome').innerHTML = monthExtra().map(x => `<div class="row"><div><b>${esc(x.name)}</b><small>${formatDateInput(x.date)}</small></div><b>${euro(x.amount)}</b><button class="edit-btn" type="button" onclick="editExtraIncome('${x.id}')" aria-label="Plusgeld bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delExtraIncome('${x.id}')" aria-label="Plusgeld löschen">×</button></div>`).join('') || '<p class="empty-note">Kein Plusgeld in diesem Monat.</p>';
+  renderPlanSummary();
 }
 function costRows(arr, type) {
   return arr.map(x => {
     const status = costStatus(type, x);
-    const label = !status.due ? 'Nicht fällig' : status.paid ? '✓ bezahlt' : '× offen';
-    const cls = !status.due ? 'idle' : status.paid ? 'paid' : 'open';
+    const label = !status.active ? 'pausiert' : !status.due ? 'Nicht fällig' : status.paid ? '✓ bezahlt' : '× offen';
+    const cls = !status.active ? 'paused' : !status.due ? 'idle' : status.paid ? 'paid' : 'open';
     const buffer = status.paid ? ` · Puffer ${status.buffer >= 0 ? '+' : '-'}${euro(Math.abs(status.buffer))}` : '';
     return `<div class="row cost-row ${cls}">
       <span class="paid-badge ${cls}">${esc(label)}</span>
-      <div><b>${esc(x.name)}</b><small>Geplant ${euro(status.planned)} · bezahlt ${euro(status.actual)}${buffer}${x.frequency === 'one_time' && x.dueDate ? ` · fällig ${formatDateInput(x.dueDate)}` : ` · ${frequencyLabel(x.frequency)}`}</small></div>
+      <div><b>${esc(x.name)}</b><small>${x.active === false ? 'pausiert · ' : ''}Geplant ${euro(status.planned)} · bezahlt ${euro(status.actual)}${buffer}${x.frequency === 'one_time' && x.dueDate ? ` · fällig ${formatDateInput(x.dueDate)}` : ` · ${frequencyLabel(x.frequency)}`}</small></div>
       <b>${euro(status.effective)}</b>
+      <button class="state-btn" type="button" onclick="toggleCost('${type}','${x.id}',${x.active !== false ? 'false' : 'true'})">${x.active !== false ? 'Pause' : 'Aktiv'}</button>
       <button class="edit-btn" type="button" onclick="editCost('${type}','${x.id}')" aria-label="Kosten bearbeiten">✎</button>
       <button class="delete-btn" type="button" onclick="delCost('${type}','${x.id}','${attr(x.name)}')" aria-label="Kosten löschen">×</button>
     </div>`;
   }).join('') || '<p class="empty-note">Noch nichts eingetragen.</p>';
+}
+function renderPlanSummary() {
+  const target = q('#planSummary');
+  if (!target) return;
+  const t = planTotals();
+  target.innerHTML = `<div class="plan-grid">
+    <div><span>Plan-Einnahmen</span><b>${euro(t.planIncome)}</b></div>
+    <div><span>nach Fix/kündbar</span><b>${euro(t.afterCosts)}</b></div>
+    <div><span>nach Budget-Töpfen</span><b>${euro(t.afterEverything)}</b></div>
+  </div>
+  <small>Rechnet mit Einkommen netto + Plusgeld minus aktive geplante Kosten. Pausierte Kosten zählen nicht.</small>`;
 }
 function expenseRow(x) {
   const bucket = transactionLabel(x);
@@ -481,7 +509,8 @@ function editCost(type, id) {
     <label>Betrag<input id="editAmount" inputmode="decimal" value="${String(item.amount || '').replace('.', ',')}"></label>
     <label>Wiederholung<select id="editFrequency">${frequencyOptionHtml(item.frequency)}</select></label>
     <label>Fällig am (nur einmalig)<input id="editDueDate" type="date" value="${attr(item.dueDate || '')}"></label>
-  `, () => api(`/api/cost/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ name: fieldValue('#editName'), amount: num(fieldValue('#editAmount')), frequency: fieldValue('#editFrequency'), dueDate: fieldValue('#editDueDate') }) }));
+    <label>Aktiv<select id="editActive"><option value="true" ${item.active !== false ? 'selected' : ''}>Aktiv</option><option value="false" ${item.active === false ? 'selected' : ''}>Pausiert</option></select></label>
+  `, () => api(`/api/cost/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ name: fieldValue('#editName'), amount: num(fieldValue('#editAmount')), frequency: fieldValue('#editFrequency'), dueDate: fieldValue('#editDueDate'), active: fieldValue('#editActive') !== 'false' }) }));
 }
 function editExtraIncome(id) {
   const item = (data.extraIncome || []).find(x => x.id === id);
@@ -539,6 +568,7 @@ function editBucket(id) {
   });
 }
 async function delCost(type, id, name) { if (await ask(`${name} löschen?`)) api(`/api/cost/${type}/${id}`, { method: 'DELETE' }); }
+async function toggleCost(type, id, active) { api(`/api/cost/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }); }
 async function delBucket(id, name) { if (await ask(`${name} löschen? Alte Ausgaben werden in Freie Verwendung verschoben.`)) api(`/api/bucket/${id}`, { method: 'DELETE' }); }
 async function toggleBucket(id, active) { api(`/api/bucket/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }); }
 async function delExpense(id, name) { if (await ask(`${name} löschen?`)) api(`/api/expense/${id}`, { method: 'DELETE' }); }

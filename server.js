@@ -87,7 +87,8 @@ function cleanCost(item = {}, existing = {}) {
     name: cleanText(item.name, existing.name || 'Kosten'),
     amount: safeNumber(item.amount, safeNumber(existing.amount, 0)),
     frequency: normalizeFrequency(item.frequency, normalizeFrequency(existing.frequency)),
-    dueDate: normalizeOptionalDate(item.dueDate === undefined ? existing.dueDate : item.dueDate)
+    dueDate: normalizeOptionalDate(item.dueDate === undefined ? existing.dueDate : item.dueDate),
+    active: item.active === undefined ? (existing.active !== false) : !!item.active
   };
 }
 function ensureBuckets(rawBuckets) {
