@@ -237,8 +237,9 @@ function render() {
   q('#freeAmount').textContent = balanceVisible ? euro(t.realAvailable) : '•••• €';
   q('#toggleBalance').textContent = balanceVisible ? '🙈' : '👁';
   q('#incomeTop').textContent = t.currentBalance === null ? euro(t.totalIncome) : euro(t.currentBalance);
+  q('#fixedOpenTop').textContent = euro(t.openFixed);
+  q('#cancelOpenTop').textContent = euro(t.openCancel);
   q('#reservedTop').textContent = euro(t.reserved);
-  q('#runningTop').textContent = euro(t.openAndReserved);
   q('#spentTop').textContent = euro(t.allSpent);
   q('#incomeInput').value = String(data.income || '').replace('.', ',');
   q('#currentBalanceInput').value = t.currentBalance === null ? '' : String(t.currentBalance).replace('.', ',');

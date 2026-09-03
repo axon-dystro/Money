@@ -35,7 +35,7 @@ h3{font-size:17px;letter-spacing:-.02em}
 .icon-button{width:46px;height:46px;display:inline-grid;place-items:center;border-radius:999px;background:var(--paper);box-shadow:var(--shadow)}
 .primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:900}.primary:hover{background:#0f4e75;border-color:#0f4e75}
 .text-button{border:0;background:transparent;color:var(--accent);padding:0;min-height:auto}.text-button:hover{background:transparent;text-decoration:underline}
-.summary-panel{display:grid;grid-template-columns:1.25fr repeat(4,1fr);gap:12px;margin:16px 0 18px}
+.summary-panel{display:grid;grid-template-columns:1.25fr repeat(5,1fr);gap:12px;margin:16px 0 18px}
 .summary-panel article{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);min-height:104px;display:flex;flex-direction:column;justify-content:center}
 .summary-panel span{font-size:13px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.05em}
 .summary-panel strong{display:block;margin-top:8px;font-size:24px;letter-spacing:-.03em}.summary-main strong{font-size:42px;letter-spacing:-.06em}.summary-main small{margin-top:6px;color:var(--muted)}
