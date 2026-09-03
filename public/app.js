@@ -320,13 +320,22 @@ function costRows(arr, type) {
     const label = !status.active ? 'pausiert' : !status.due ? 'Nicht fällig' : status.paid ? '✓ bezahlt' : '× offen';
     const cls = !status.active ? 'paused' : !status.due ? 'idle' : status.paid ? 'paid' : 'open';
     const buffer = status.paid ? ` · Puffer ${status.buffer >= 0 ? '+' : '-'}${euro(Math.abs(status.buffer))}` : '';
+    const matchTerms = Array.isArray(x.matchTerms) && x.matchTerms.length ? `<span class="match-terms">Erkennung: ${esc(x.matchTerms.join(', '))}</span>` : '';
     return `<div class="row cost-row ${cls}">
-      <span class="paid-badge ${cls}">${esc(label)}</span>
-      <div><b>${esc(x.name)}</b><small>${x.active === false ? 'pausiert · ' : ''}Geplant ${euro(status.planned)} · bezahlt ${euro(status.actual)}${buffer}${x.frequency === 'one_time' && x.dueDate ? ` · fällig ${formatDateInput(x.dueDate)}` : ` · ${frequencyLabel(x.frequency)}`}</small></div>
-      <b>${euro(status.effective)}</b>
-      <button class="state-btn" type="button" onclick="toggleCost('${type}','${x.id}',${x.active !== false ? 'false' : 'true'})">${x.active !== false ? 'Pause' : 'Aktiv'}</button>
-      <button class="edit-btn" type="button" onclick="editCost('${type}','${x.id}')" aria-label="Kosten bearbeiten">✎</button>
-      <button class="delete-btn" type="button" onclick="delCost('${type}','${x.id}','${attr(x.name)}')" aria-label="Kosten löschen">×</button>
+      <div class="cost-main">
+        <span class="paid-badge ${cls}">${esc(label)}</span>
+        <div class="cost-copy">
+          <b>${esc(x.name)}</b>
+          <small>${x.active === false ? 'pausiert · ' : ''}Geplant ${euro(status.planned)} · bezahlt ${euro(status.actual)}${buffer}${x.frequency === 'one_time' && x.dueDate ? ` · fällig ${formatDateInput(x.dueDate)}` : ` · ${frequencyLabel(x.frequency)}`}</small>
+          ${matchTerms}
+        </div>
+      </div>
+      <div class="cost-actions">
+        <b>${euro(status.effective)}</b>
+        <button class="state-btn" type="button" onclick="toggleCost('${type}','${x.id}',${x.active !== false ? 'false' : 'true'})">${x.active !== false ? 'Pause' : 'Aktiv'}</button>
+        <button class="edit-btn" type="button" onclick="editCost('${type}','${x.id}')" aria-label="Kosten bearbeiten">✎</button>
+        <button class="delete-btn" type="button" onclick="delCost('${type}','${x.id}','${attr(x.name)}')" aria-label="Kosten löschen">×</button>
+      </div>
     </div>`;
   }).join('') || '<p class="empty-note">Noch nichts eingetragen.</p>';
 }
@@ -510,7 +519,8 @@ function editCost(type, id) {
     <label>Wiederholung<select id="editFrequency">${frequencyOptionHtml(item.frequency)}</select></label>
     <label>Fällig am (nur einmalig)<input id="editDueDate" type="date" value="${attr(item.dueDate || '')}"></label>
     <label>Aktiv<select id="editActive"><option value="true" ${item.active !== false ? 'selected' : ''}>Aktiv</option><option value="false" ${item.active === false ? 'selected' : ''}>Pausiert</option></select></label>
-  `, () => api(`/api/cost/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ name: fieldValue('#editName'), amount: num(fieldValue('#editAmount')), frequency: fieldValue('#editFrequency'), dueDate: fieldValue('#editDueDate'), active: fieldValue('#editActive') !== 'false' }) }));
+    <label class="wide">Erkennung<input id="editMatchTerms" value="${attr((item.matchTerms || []).join(', '))}" placeholder="z. B. CleverFit GmbH, DE..."></label>
+  `, () => api(`/api/cost/${type}/${id}`, { method: 'PATCH', body: JSON.stringify({ name: fieldValue('#editName'), amount: num(fieldValue('#editAmount')), frequency: fieldValue('#editFrequency'), dueDate: fieldValue('#editDueDate'), active: fieldValue('#editActive') !== 'false', matchTerms: fieldValue('#editMatchTerms') }) }));
 }
 function editExtraIncome(id) {
   const item = (data.extraIncome || []).find(x => x.id === id);
@@ -719,8 +729,16 @@ function wire() {
     api('/api/bucket', { method: 'POST', body: JSON.stringify({ name: q('#bucketName').value, mode: q('#bucketMode').value, frequency: q('#bucketFrequency').value, dueDate: q('#bucketDueDate').value, amount: num(q('#bucketAmount').value), unitAmount: num(q('#bucketUnitAmount').value), unitCount: num(q('#bucketUnitCount').value), periods: num(q('#bucketPeriods').value) || 4 }) });
     ['#bucketName', '#bucketAmount', '#bucketUnitAmount', '#bucketUnitCount', '#bucketPeriods', '#bucketDueDate'].forEach(s => q(s).value = '');
   };
-  q('#fixedForm').onsubmit = e => { e.preventDefault(); api('/api/cost', { method: 'POST', body: JSON.stringify({ type: 'fixedCosts', name: q('#fixedName').value, amount: num(q('#fixedAmount').value), frequency: q('#fixedFrequency').value, dueDate: q('#fixedDueDate').value }) }); q('#fixedName').value = q('#fixedAmount').value = q('#fixedDueDate').value = ''; };
-  q('#cancelForm').onsubmit = e => { e.preventDefault(); api('/api/cost', { method: 'POST', body: JSON.stringify({ type: 'cancelableCosts', name: q('#cancelName').value, amount: num(q('#cancelAmount').value), frequency: q('#cancelFrequency').value, dueDate: q('#cancelDueDate').value }) }); q('#cancelName').value = q('#cancelAmount').value = q('#cancelDueDate').value = ''; };
+  q('#fixedForm').onsubmit = e => {
+    e.preventDefault();
+    api('/api/cost', { method: 'POST', body: JSON.stringify({ type: 'fixedCosts', name: q('#fixedName').value, amount: num(q('#fixedAmount').value), frequency: q('#fixedFrequency').value, dueDate: q('#fixedDueDate').value, matchTerms: q('#fixedMatchTerms').value }) });
+    q('#fixedName').value = q('#fixedAmount').value = q('#fixedDueDate').value = q('#fixedMatchTerms').value = '';
+  };
+  q('#cancelForm').onsubmit = e => {
+    e.preventDefault();
+    api('/api/cost', { method: 'POST', body: JSON.stringify({ type: 'cancelableCosts', name: q('#cancelName').value, amount: num(q('#cancelAmount').value), frequency: q('#cancelFrequency').value, dueDate: q('#cancelDueDate').value, matchTerms: q('#cancelMatchTerms').value }) });
+    q('#cancelName').value = q('#cancelAmount').value = q('#cancelDueDate').value = q('#cancelMatchTerms').value = '';
+  };
   q('#extraIncomeForm').onsubmit = e => { e.preventDefault(); api('/api/extra-income', { method: 'POST', body: JSON.stringify({ name: q('#extraName').value, amount: num(q('#extraAmount').value), date: q('#extraDate').value }) }); q('#extraName').value = q('#extraAmount').value = ''; };
 }
 wire();

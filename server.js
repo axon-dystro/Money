@@ -53,6 +53,11 @@ function safeNumber(v, fallback = 0) { const n = Number(v); return Number.isFini
 function normalizeName(v) {
   return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 }
+function cleanMatchTerms(value, fallback = []) {
+  const input = value === undefined ? fallback : value;
+  const raw = Array.isArray(input) ? input : String(input || '').split(/[,;\n]/);
+  return raw.map(x => cleanText(x, '')).filter(Boolean).slice(0, 20);
+}
 function cleanBucket(body = {}, existing = {}) {
   const mode = ['money', 'unit', 'saving'].includes(body.mode) ? body.mode : (existing.mode || 'money');
   const unitAmount = safeNumber(body.unitAmount, safeNumber(existing.unitAmount, 0));
@@ -85,6 +90,7 @@ function cleanCost(item = {}, existing = {}) {
     ...existing,
     id: item.id || existing.id || id(),
     name: cleanText(item.name, existing.name || 'Kosten'),
+    matchTerms: cleanMatchTerms(item.matchTerms, existing.matchTerms || []),
     amount: safeNumber(item.amount, safeNumber(existing.amount, 0)),
     frequency: normalizeFrequency(item.frequency, normalizeFrequency(existing.frequency)),
     dueDate: normalizeOptionalDate(item.dueDate === undefined ? existing.dueDate : item.dueDate),
@@ -230,6 +236,8 @@ function namedCostMatch(source, d) {
   }
   for (const type of collections) {
     const item = d[type].find(cost => {
+      const customTerms = cleanMatchTerms(cost.matchTerms || []);
+      if (customTerms.some(term => source.includes(normalizeName(term)))) return true;
       const tokens = String(cost.name || '').toLowerCase().match(/[a-zäöüß0-9]{4,}/g) || [];
       return tokens.some(token => source.includes(normalizeName(token)));
     });
