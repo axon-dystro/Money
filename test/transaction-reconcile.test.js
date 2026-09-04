@@ -51,6 +51,31 @@ test('reconciles a card mail with one matching manual entry', () => {
   assert.equal(match.reason, 'manual-entry');
 });
 
+test('treats a repeated card mail for the same merchant as duplicate', () => {
+  const expenses = [{
+    id: 'card-discord-1',
+    amount: 10.84,
+    date: '2026-09-04',
+    merchant: 'DISCORD',
+    note: 'DISCORD',
+    source: 'sparkasse-kartenwecker',
+    sourceId: 'mail-card-discord-1',
+    sourceStatus: 'pending'
+  }];
+  const incoming = {
+    amount: 10.84,
+    date: '2026-09-04',
+    merchant: 'DISCORD* NITROMONTHLY SAN FRANCISCO US',
+    source: 'sparkasse-kartenwecker',
+    sourceId: 'mail-card-discord-2'
+  };
+
+  const match = findExpenseImportMatch(expenses, incoming);
+  assert.equal(match.action, 'duplicate');
+  assert.equal(match.reason, 'pending-card-duplicate');
+  assert.equal(match.existing.id, 'card-discord-1');
+});
+
 test('does not reconcile a new booked transaction with a cleared similar expense', () => {
   const expenses = [{
     id: 'cleared-1',
