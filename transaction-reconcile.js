@@ -137,6 +137,10 @@ function findExpenseImportMatch(expenses = [], incoming = {}, options = {}) {
     .sort((a, b) => (b.refOverlap - a.refOverlap) || (b.score - a.score) || (a.dateGap - b.dateGap));
 
   if (isCardSource(incoming.source)) {
+    const cardCandidates = candidates.filter(candidate => isCardExpense(candidate.expense));
+    if (cardCandidates.length === 1) return { action: 'duplicate', reason: 'pending-card-duplicate', existing: cardCandidates[0].expense, match: cardCandidates[0] };
+    if (cardCandidates.length > 1) return { action: 'ambiguous', reason: 'pending-card-duplicate', candidates: cardCandidates.map(x => x.expense) };
+
     const manualCandidates = candidates.filter(candidate => !candidate.expense.source && candidate.score >= 0.72 && candidate.dateGap <= 1);
     if (manualCandidates.length === 1) return { action: 'reconcile', reason: 'manual-entry', existing: manualCandidates[0].expense, match: manualCandidates[0] };
     if (manualCandidates.length > 1) return { action: 'ambiguous', reason: 'manual-entry', candidates: manualCandidates.map(x => x.expense) };
