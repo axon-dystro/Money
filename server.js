@@ -490,7 +490,6 @@ app.post('/api/expense', (req, res) => {
   let amount = safeNumber(req.body.amount, 0);
   const bucket = d.budgetBuckets.find(b => b.id === targetId) || d.budgetBuckets.find(b => b.system === 'free_use' || b.id === 'bucket_frei') || d.budgetBuckets[0];
   if (!amount && bucket?.mode === 'unit') amount = safeNumber(bucket.unitAmount, 0);
-  if (d.settings.roundExpensesUp) amount = Math.ceil(amount);
   const target = resolveExpenseTarget(targetType, targetId, {
     bucketId: bucket?.id,
     category: bucket?.name || 'Freie Verwendung'
@@ -505,7 +504,7 @@ app.patch('/api/expense/:id', (req, res) => {
   const targetType = req.body.targetType || 'budget';
   const targetId = req.body.targetId || req.body.bucketId;
   Object.assign(item, resolveExpenseTarget(targetType, targetId, item, d));
-  item.amount = d.settings.roundExpensesUp ? Math.ceil(safeNumber(req.body.amount, item.amount)) : safeNumber(req.body.amount, item.amount);
+  item.amount = safeNumber(req.body.amount, item.amount);
   item.note = cleanText(req.body.note, item.note);
   item.date = normalizeDate(req.body.date || item.date);
   save(d); res.json(d);
