@@ -78,6 +78,12 @@ function openCostTotal(type) {
     return total + (status.due && !status.paid ? status.effective : 0);
   }, 0);
 }
+function plannedBufferTotal(type) {
+  return (data[type] || []).reduce((total, item) => {
+    const status = costStatus(type, item);
+    return total + (status.active && status.paid ? Math.max(0, status.planned - status.actual) : 0);
+  }, 0);
+}
 function currentBalanceValue() {
   const value = Number(data.settings?.currentBalance);
   return Number.isFinite(value) ? value : null;
@@ -154,7 +160,9 @@ function totals() {
   const totalIncome = num(data.income) + extra;
   const running = fixed + cancel;
   const plannedRunning = fixedPlanned + cancelPlanned;
-  const releasedBuffer = costBufferEnabled() ? 0 : Math.max(0, plannedRunning - running);
+  const plannedBuffer = plannedBufferTotal('fixedCosts') + plannedBufferTotal('cancelableCosts');
+  const heldBuffer = costBufferEnabled() ? plannedBuffer : 0;
+  const releasedBuffer = costBufferEnabled() ? 0 : plannedBuffer;
   const reserved = activeBuckets().reduce((s, b) => s + bucketBudget(b), 0);
   const expenses = monthExpenses();
   const allSpent = sum(expenses);
@@ -164,15 +172,18 @@ function totals() {
   const unplanned = totalIncome - running - reserved - unbucketed - overspend;
   const currentBalance = currentBalanceValue();
   const openRunning = openFixed + openCancel;
-  const realAvailable = currentBalance === null ? unplanned : currentBalance - openRunning - reserved - overspend;
+  const realAvailable = currentBalance === null ? unplanned - heldBuffer : currentBalance - openRunning - reserved - overspend - heldBuffer;
+  const reserveAvailable = currentBalance === null ? null : currentBalance - openRunning;
   const openAndReserved = openRunning + reserved;
-  return { fixed, cancel, openFixed, openCancel, fixedPlanned, cancelPlanned, extra, totalIncome, currentBalance, openRunning, openAndReserved, running, plannedRunning, releasedBuffer, reserved, allSpent, unplanned, realAvailable };
+  return { fixed, cancel, openFixed, openCancel, fixedPlanned, cancelPlanned, extra, totalIncome, currentBalance, openRunning, openAndReserved, running, plannedRunning, plannedBuffer, heldBuffer, releasedBuffer, reserved, allSpent, unplanned, realAvailable, reserveAvailable };
 }
 function reserveFloorForMonth() {
   const now = new Date();
   if (monthKey(now) !== monthKey(shownMonth)) return 0;
   const configured = Number(data.settings?.reserveFloor);
-  return Number.isFinite(configured) && configured > 0 ? configured : 200;
+  const start = Number.isFinite(configured) && configured > 0 ? configured : 200;
+  const period = currentPeriod(4);
+  return Math.max(50, start - ((period - 1) * ((start - 50) / 3)));
 }
 function renderWarnings(t) {
   const target = q('#alertPanel');
@@ -187,11 +198,11 @@ function renderWarnings(t) {
     });
   }
   const floor = reserveFloorForMonth();
-  if (floor && t.currentBalance !== null && t.currentBalance < floor && t.openRunning <= 0) {
+  if (floor && t.reserveAvailable !== null && t.reserveAvailable < floor) {
     warnings.push({
-      level: t.currentBalance < 0 ? 'danger' : 'warn',
+      level: t.reserveAvailable < 0 ? 'danger' : 'warn',
       title: 'Kontoreserve wird knapp',
-      text: `Dein aktueller Saldo liegt bei ${euro(t.currentBalance)}. Deine Mindestreserve ist ${euro(floor)}.`
+      text: `Nach offenen Fix/kündbaren Kosten bleiben ${euro(t.reserveAvailable)}. Mindestreserve für diesen Monatsabschnitt: ${euro(floor)}.`
     });
   }
   if (t.currentBalance !== null && t.openRunning > 0 && t.currentBalance - t.openRunning < 0) {
@@ -206,6 +217,13 @@ function renderWarnings(t) {
       level: 'info',
       title: 'Puffer ausgeschaltet',
       text: `${euro(t.releasedBuffer)} geplanter Puffer aus bereits bezahlten Fixkosten ist wieder frei gerechnet.`
+    });
+  }
+  if (costBufferEnabled() && t.heldBuffer > 0) {
+    warnings.push({
+      level: 'info',
+      title: 'Puffer aktiv',
+      text: `${euro(t.heldBuffer)} bezahlter Kostenpuffer bleibt absichtlich versteckt.`
     });
   }
   target.innerHTML = warnings.map(item => `<article class="alert-card ${item.level}"><b>${esc(item.title)}</b><span>${esc(item.text)}</span></article>`).join('');
