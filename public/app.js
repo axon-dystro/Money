@@ -165,9 +165,10 @@ function totals() {
   const releasedBuffer = costBufferEnabled() ? 0 : plannedBuffer;
   const reserved = activeBuckets().reduce((s, b) => s + bucketBudget(b), 0);
   const expenses = monthExpenses();
-  const allSpent = sum(expenses);
+  const budgetExpenses = expenses.filter(e => e.kind !== 'fixedCosts' && e.kind !== 'cancelableCosts');
+  const allSpent = sum(budgetExpenses);
   const bucketIds = new Set(activeBuckets().map(b=>b.id));
-  const unbucketed = expenses.filter(e => e.kind !== 'fixedCosts' && e.kind !== 'cancelableCosts').filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+num(e.amount),0);
+  const unbucketed = budgetExpenses.filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+num(e.amount),0);
   const overspend = activeBuckets().reduce((a,b)=>{ const st=bucketStatus(b); return a+Math.max(0,-st.left); },0);
   const unplanned = totalIncome - running - reserved - unbucketed - overspend;
   const currentBalance = currentBalanceValue();
