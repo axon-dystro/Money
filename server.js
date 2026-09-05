@@ -58,6 +58,13 @@ function cleanMatchTerms(value, fallback = []) {
   const raw = Array.isArray(input) ? input : String(input || '').split(/[,;\n]/);
   return raw.map(x => cleanText(x, '')).filter(Boolean).slice(0, 20);
 }
+function matchSourceTerm(source, term) {
+  const cleanSource = normalizeName(source);
+  const cleanTerm = normalizeName(term);
+  if (!cleanSource || !cleanTerm) return false;
+  if (cleanSource.includes(cleanTerm)) return true;
+  return cleanSource.length >= 6 && cleanTerm.length >= 6 && cleanTerm.includes(cleanSource);
+}
 function cleanBucket(body = {}, existing = {}) {
   const mode = ['money', 'unit', 'saving'].includes(body.mode) ? body.mode : (existing.mode || 'money');
   const unitAmount = safeNumber(body.unitAmount, safeNumber(existing.unitAmount, 0));
@@ -217,7 +224,7 @@ function namedCostMatch(source, d) {
     { any: ['telefonica', 'o2'], target: 'handyinternet' },
     { any: ['ard', 'zdf', 'deutschlandradio', 'rundfunkbeitrag', 'beitragsservice'], target: 'ard' },
     { any: ['schufa'], target: 'schufa' },
-    { any: ['cleverfit', 'cleverfitgmbh'], target: 'cleverfit' },
+    { any: ['cleverfi', 'cleverfit', 'cleverfitgmbh'], target: 'cleverfit' },
     { any: ['discord'], target: 'discordnitro' },
     { any: ['openai', 'chatgpt'], target: 'chatgpt' },
     { any: ['googleone', 'gmail'], target: 'gmail' },
@@ -237,7 +244,7 @@ function namedCostMatch(source, d) {
   for (const type of collections) {
     const item = d[type].find(cost => {
       const customTerms = cleanMatchTerms(cost.matchTerms || []);
-      if (customTerms.some(term => source.includes(normalizeName(term)))) return true;
+      if (customTerms.some(term => matchSourceTerm(source, term))) return true;
       const tokens = String(cost.name || '').toLowerCase().match(/[a-zäöüß0-9]{4,}/g) || [];
       return tokens.some(token => source.includes(normalizeName(token)));
     });
