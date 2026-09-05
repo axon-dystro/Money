@@ -29,6 +29,21 @@ function formatDateInput(iso) {
 function monthKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
 function dateMonth(v) { return parseDateInput(v).slice(0, 7); }
 function sum(a) { return a.reduce((s, x) => s + num(x.amount), 0); }
+function roundExpensesEnabled() { return !!data.settings?.roundExpensesUp; }
+function roundedExpenseAmount(value) {
+  const amount = num(value);
+  if (!roundExpensesEnabled() || amount <= 0 || Number.isInteger(amount)) return amount;
+  if (amount < 10) return Math.ceil(amount);
+  if (amount < 20) {
+    const cents = amount - Math.floor(amount);
+    return cents <= 0.25 ? Math.ceil(amount) : Math.ceil(amount / 5) * 5;
+  }
+  return Math.ceil(amount / 5) * 5;
+}
+function expenseAmount(e) {
+  if (e.kind === 'fixedCosts' || e.kind === 'cancelableCosts') return num(e.amount);
+  return roundedExpenseAmount(e.amount);
+}
 const frequencyLabels = {
   weekly: 'wöchentlich', biweekly: 'alle 2 Wochen', monthly: 'monatlich',
   quarterly: 'vierteljährlich', yearly: 'jährlich', one_time: 'einmalig'
@@ -135,13 +150,13 @@ function bucketStatus(b) {
   const total = bucketBudget(b);
   const items = expensesForBucket(b);
   const spentBy = Array.from({ length: periods }, () => 0);
-  for (const e of items) spentBy[expensePeriod(e, periods) - 1] += num(e.amount);
+  for (const e of items) spentBy[expensePeriod(e, periods) - 1] += expenseAmount(e);
 
   const p = currentPeriod(periods);
   const spentPast = spentBy.slice(0, p - 1).reduce((a, b) => a + b, 0);
   const availableNow = (total - spentPast) / Math.max(1, periods - p + 1);
   const spentNow = spentBy[p - 1] || 0;
-  const spent = sum(items);
+  const spent = items.reduce((total, e) => total + expenseAmount(e), 0);
   const left = total - spent;
   const spentUntilNow = spentBy.slice(0, p).reduce((a, b) => a + b, 0);
   const nextAllowance = p < periods ? (total - spentUntilNow) / Math.max(1, periods - p) : 0;
@@ -166,9 +181,9 @@ function totals() {
   const reserved = activeBuckets().reduce((s, b) => s + bucketBudget(b), 0);
   const expenses = monthExpenses();
   const budgetExpenses = expenses.filter(e => e.kind !== 'fixedCosts' && e.kind !== 'cancelableCosts');
-  const allSpent = sum(budgetExpenses);
+  const allSpent = budgetExpenses.reduce((total, e) => total + expenseAmount(e), 0);
   const bucketIds = new Set(activeBuckets().map(b=>b.id));
-  const unbucketed = budgetExpenses.filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+num(e.amount),0);
+  const unbucketed = budgetExpenses.filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+expenseAmount(e),0);
   const overspend = activeBuckets().reduce((a,b)=>{ const st=bucketStatus(b); return a+Math.max(0,-st.left); },0);
   const unplanned = totalIncome - running - reserved - unbucketed - overspend;
   const currentBalance = currentBalanceValue();
@@ -213,20 +228,6 @@ function renderWarnings(t) {
       text: `Aktueller Saldo ${euro(t.currentBalance)}, noch offene Fix/kündbare Kosten ${euro(t.openRunning)}.`
     });
   }
-  if (!costBufferEnabled() && t.releasedBuffer > 0) {
-    warnings.push({
-      level: 'info',
-      title: 'Puffer ausgeschaltet',
-      text: `${euro(t.releasedBuffer)} geplanter Puffer aus bereits bezahlten Fixkosten ist wieder frei gerechnet.`
-    });
-  }
-  if (costBufferEnabled() && t.heldBuffer > 0) {
-    warnings.push({
-      level: 'info',
-      title: 'Puffer aktiv',
-      text: `${euro(t.heldBuffer)} bezahlter Kostenpuffer bleibt absichtlich versteckt.`
-    });
-  }
   target.innerHTML = warnings.map(item => `<article class="alert-card ${item.level}"><b>${esc(item.title)}</b><span>${esc(item.text)}</span></article>`).join('');
   target.classList.toggle('hidden', warnings.length === 0);
 }
@@ -269,6 +270,16 @@ function render() {
   if (!data) return;
   const t = totals();
   q('#freeAmount').textContent = balanceVisible ? euro(t.realAvailable) : '•••• €';
+  const bufferPill = q('#bufferPill');
+  if (bufferPill) {
+    const bufferAmount = costBufferEnabled() ? t.heldBuffer : t.releasedBuffer;
+    bufferPill.textContent = bufferAmount > 0 ? `P ${euro(bufferAmount)}` : '';
+    bufferPill.title = costBufferEnabled()
+      ? 'Puffer ist aktiv und bleibt versteckt'
+      : 'Puffer ist ausgeschaltet und wieder freigerechnet';
+    bufferPill.classList.toggle('hidden', bufferAmount <= 0);
+    bufferPill.classList.toggle('off', !costBufferEnabled());
+  }
   q('#toggleBalance').textContent = balanceVisible ? '🙈' : '👁';
   q('#incomeTop').textContent = t.currentBalance === null ? euro(t.totalIncome) : euro(t.currentBalance);
   q('#fixedOpenTop').textContent = euro(t.openFixed);
@@ -372,7 +383,10 @@ function renderPlanSummary() {
 function expenseRow(x) {
   const bucket = transactionLabel(x);
   const note = x.note ? esc(x.note) : 'ohne Notiz';
-  return `<div class="row expense-row"><div><b>${esc(bucket)}</b><small>${formatDateInput(x.date)} · ${note}</small></div><b>${euro(x.amount)}</b><button class="edit-btn" type="button" onclick="editExpense('${x.id}')" aria-label="Ausgabe bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delExpense('${x.id}','${attr(bucket)}')" aria-label="Ausgabe löschen">×</button></div>`;
+  const calcAmount = expenseAmount(x);
+  const roundedNote = Math.abs(calcAmount - num(x.amount)) >= 0.01 ? ` · echt ${euro(x.amount)}` : '';
+  const kindClass = x.kind === 'fixedCosts' ? 'fixed-expense' : x.kind === 'cancelableCosts' ? 'cancelable-expense' : 'budget-expense';
+  return `<div class="row expense-row ${kindClass}"><div><b>${esc(bucket)}</b><small>${formatDateInput(x.date)} · ${note}${roundedNote}</small></div><b>${euro(calcAmount)}</b><button class="edit-btn" type="button" onclick="editExpense('${x.id}')" aria-label="Ausgabe bearbeiten">✎</button><button class="delete-btn" type="button" onclick="delExpense('${x.id}','${attr(bucket)}')" aria-label="Ausgabe löschen">×</button></div>`;
 }
 
 function renderMonth() {
