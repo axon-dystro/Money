@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Budget Master</title>
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/style.css?v=49">
+  <link rel="stylesheet" href="/style.css?v=50">
 </head>
 <body>
 <main class="app-shell">
@@ -23,7 +23,7 @@
 
   <section class="summary-panel" aria-label="Monatszusammenfassung">
     <article class="summary-main">
-      <span>Verfügbar</span>
+      <span>Verfügbar <em id="bufferPill" class="buffer-pill hidden"></em></span>
       <strong id="freeAmount">0,00 €</strong>
       <small>Saldo minus offene Kosten, reservierte Töpfe und aktiver Puffer.</small>
     </article>
@@ -255,6 +255,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=49"></script>
+<script src="/app.js?v=50"></script>
 </body>
 </html>
