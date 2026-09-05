@@ -65,6 +65,8 @@ function matchSourceTerm(source, term) {
   if (cleanSource.includes(cleanTerm)) return true;
   return cleanSource.length >= 6 && cleanTerm.length >= 6 && cleanTerm.includes(cleanSource);
 }
+function amountCents(value) { return Math.round(safeNumber(value, 0) * 100); }
+function amountDistanceCents(a, b) { return Math.abs(amountCents(a) - amountCents(b)); }
 function cleanBucket(body = {}, existing = {}) {
   const mode = ['money', 'unit', 'saving'].includes(body.mode) ? body.mode : (existing.mode || 'money');
   const unitAmount = safeNumber(body.unitAmount, safeNumber(existing.unitAmount, 0));
@@ -213,7 +215,21 @@ function load() {
 }
 function save(data) { fs.writeFileSync(DB_PATH, JSON.stringify(migrate(data), null, 2)); }
 
-function namedCostMatch(source, d) {
+function chooseCostCandidate(candidates, amount) {
+  if (!candidates.length) return null;
+  const unique = candidates.filter((candidate, index) => candidates.findIndex(x => x.type === candidate.type && x.item.id === candidate.item.id) === index);
+  const active = unique.filter(candidate => candidate.item.active !== false);
+  const pool = active.length ? active : unique;
+  const withAmount = amountCents(amount) > 0
+    ? pool.map(candidate => ({ ...candidate, amountDistance: amountDistanceCents(candidate.item.amount, amount) }))
+    : pool.map(candidate => ({ ...candidate, amountDistance: Number.POSITIVE_INFINITY }));
+  const exact = withAmount.filter(candidate => candidate.amountDistance <= 1);
+  const sorted = (exact.length ? exact : withAmount).sort((a, b) => a.amountDistance - b.amountDistance);
+  const best = sorted[0];
+  return { targetType: best.type, targetId: best.item.id, targetName: best.item.name };
+}
+
+function namedCostMatch(source, d, amount = 0) {
   const rules = [
     { all: ['ergo', 'rechtsschutz'], target: 'rechtsschutz' },
     { all: ['ergo', 'hausrat'], target: 'hausrat' },
@@ -233,29 +249,35 @@ function namedCostMatch(source, d) {
     { any: ['iphone'], target: 'iphoneschulden' }
   ];
   const collections = ['fixedCosts', 'cancelableCosts'];
+  const candidates = [];
   for (const rule of rules) {
     const matches = rule.all ? rule.all.every(word => source.includes(word)) : rule.any.some(word => source.includes(word));
     if (!matches) continue;
     for (const type of collections) {
       const item = d[type].find(x => normalizeName(x.name).includes(rule.target));
-      if (item) return { targetType: type, targetId: item.id, targetName: item.name };
+      if (item) candidates.push({ type, item });
     }
   }
+  const ruleMatch = chooseCostCandidate(candidates, amount);
+  if (ruleMatch) return ruleMatch;
+  const customCandidates = [];
   for (const type of collections) {
-    const item = d[type].find(cost => {
+    for (const cost of d[type]) {
       const customTerms = cleanMatchTerms(cost.matchTerms || []);
-      if (customTerms.some(term => matchSourceTerm(source, term))) return true;
+      if (customTerms.some(term => matchSourceTerm(source, term))) {
+        customCandidates.push({ type, item: cost });
+        continue;
+      }
       const tokens = String(cost.name || '').toLowerCase().match(/[a-zäöüß0-9]{4,}/g) || [];
-      return tokens.some(token => source.includes(normalizeName(token)));
-    });
-    if (item) return { targetType: type, targetId: item.id, targetName: item.name };
+      if (tokens.some(token => source.includes(normalizeName(token)))) customCandidates.push({ type, item: cost });
+    }
   }
-  return null;
+  return chooseCostCandidate(customCandidates, amount);
 }
 
 function suggestTransactionTarget(tx, d) {
   const source = normalizeName(`${tx.merchant || ''} ${tx.bookingType || ''} ${tx.details || ''}`);
-  const cost = namedCostMatch(source, d);
+  const cost = namedCostMatch(source, d, tx.amount);
   if (cost) return cost;
   const bucket = findBestBucket({ merchant: tx.merchant, name: tx.merchant, note: tx.details }, d.budgetBuckets);
   return { targetType: 'budget', targetId: bucket?.id || freeBucketId(d.budgetBuckets), targetName: bucket?.name || 'Freie Verwendung' };
