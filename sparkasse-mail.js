@@ -57,10 +57,7 @@ function transactionCandidateLines(value) {
 }
 
 function extractTransactionAmountAndMerchant(subject, text, combined) {
-  const candidates = [
-    ...transactionCandidateLines(text),
-    ...transactionCandidateLines(combined)
-  ];
+  const candidates = transactionCandidateLines(text);
   const preferred = candidates.find(line => /[:：]\s*[+-]?\d/.test(line)) || candidates[0] || '';
   if (preferred) {
     const amountSource = GERMAN_AMOUNT_RE.source;
@@ -88,24 +85,44 @@ function extractTransactionAmountAndMerchant(subject, text, combined) {
   };
 }
 
+function parseTransactionLine(line) {
+  const amountSource = GERMAN_AMOUNT_RE.source;
+  const colonMatch = line.match(new RegExp(`^(.*?)\\s*[:：]\\s*${amountSource}\\s*(?:EUR|€)`, 'i'));
+  const looseMatch = line.match(new RegExp(`^(.*?)\\s+${amountSource}\\s*(?:EUR|€)`, 'i'));
+  const match = colonMatch || looseMatch;
+  if (!match?.[2]) return null;
+  const amount = parseGermanAmount(match[2]);
+  if (!amount || amount <= 0) return null;
+  return {
+    rawAmount: match[2],
+    amount,
+    merchant: normalizeMerchant(match[1]),
+    signed: /^\s*-/.test(match[2]) ? -1 : 1,
+    rawLine: line
+  };
+}
+
 function extractBalance(value) {
   const text = normalizeText(value);
   const match = text.match(/neuer\s+saldo\s*:\s*([+-]?\d{1,3}(?:\.\d{3})*(?:,\d{2})|[+-]?\d+(?:,\d{2}))\s*(?:EUR|€)/i);
   return match ? parseSignedGermanAmount(match[1]) : null;
 }
 
-function parseUmsatzweckerMail(mail) {
+function parseUmsatzweckerTransactions(mail) {
   const subject = normalizeText(mail.subject || '');
   const rawBody = String(mail.text || mail.html || '');
   const text = normalizeText(rawBody);
   const combined = `${subject} ${text}`;
 
-  if (!/sparkasse|umsatzwecker|kontowecker|kartenwecker/i.test(combined)) return null;
+  if (!/sparkasse|umsatzwecker|kontowecker|kartenwecker/i.test(combined)) return [];
 
-  const parsedTransaction = extractTransactionAmountAndMerchant(subject, rawBody, combined);
-  const rawAmount = parsedTransaction.rawAmount;
-  const amount = parsedTransaction.amount;
-  if (!amount || amount <= 0) return null;
+  const lines = transactionCandidateLines(rawBody);
+  const transactions = lines.map(parseTransactionLine).filter(Boolean);
+  if (!transactions.length) {
+    const fallback = extractTransactionAmountAndMerchant(subject, rawBody, combined);
+    if (fallback.amount && fallback.amount > 0) transactions.push(fallback);
+  }
+  if (!transactions.length) return [];
 
   const incoming = /geldeingang|gutschrift|eingegangen|gutgeschrieben/i.test(combined);
   const outgoing = /geldausgang|abbuchung|belastung|abgebucht|kartenzahlung|zahlung|bezahlt|bezahlen|einkauf|karteneinsatz|kartenwecker/i.test(combined) && !incoming;
@@ -118,25 +135,36 @@ function parseUmsatzweckerMail(mail) {
     /(?:zahlungsempf[aä]nger|empf[aä]nger|h[aä]ndler|zahlung bei|umsatz bei|verwendungszweck)\s*[:\-]\s*([^|]{2,100}?)(?=\s{2,}|betrag|datum|iban|$)/i,
     /(?:bei|an)\s+([A-ZÄÖÜ0-9][A-Za-zÄÖÜäöüß0-9 .,&'\-/]{2,80}?)(?=\s+[+-]?\d+[.,]\d{2}\s*(?:EUR|€)|$)/i
   ];
-  let merchant = parsedTransaction.merchant || '';
-  for (const re of labelPatterns) {
-    if (merchant) break;
-    const m = combined.match(re);
-    if (m?.[1]) { merchant = normalizeText(m[1]); break; }
-  }
-  if (!merchant) merchant = subject.replace(/umsatzwecker|kontowecker|sparkasse/gi, '').replace(/[:\-]+/g, ' ').trim() || 'Sparkassen-Umsatz';
+  const balance = extractBalance(combined);
+  const transactionDate = parseTransactionDate(combined);
+  const sourceRefs = extractReferenceTokens(combined);
 
-  return {
-    type: incoming || parsedTransaction.signed > 0 && !outgoing ? 'income' : outgoing || parsedTransaction.signed < 0 ? 'expense' : 'unknown',
-    weckerType,
-    amount,
-    merchant: merchant.slice(0, 120),
-    subject,
-    rawText: text.slice(0, 4000),
-    transactionDate: parseTransactionDate(combined),
-    balance: extractBalance(combined),
-    sourceRefs: extractReferenceTokens(combined)
-  };
+  return transactions.map((parsedTransaction, index) => {
+    let merchant = parsedTransaction.merchant || '';
+    for (const re of labelPatterns) {
+      if (merchant) break;
+      const m = combined.match(re);
+      if (m?.[1]) { merchant = normalizeText(m[1]); break; }
+    }
+    if (!merchant) merchant = subject.replace(/umsatzwecker|kontowecker|sparkasse/gi, '').replace(/[:\-]+/g, ' ').trim() || 'Sparkassen-Umsatz';
+
+    return {
+      type: incoming || parsedTransaction.signed > 0 && !outgoing ? 'income' : outgoing || parsedTransaction.signed < 0 ? 'expense' : 'unknown',
+      weckerType,
+      amount: parsedTransaction.amount,
+      merchant: merchant.slice(0, 120),
+      subject,
+      rawText: text.slice(0, 4000),
+      transactionDate,
+      balance,
+      sourceRefs: [...sourceRefs, ...extractReferenceTokens(parsedTransaction.rawLine || '')],
+      transactionIndex: index
+    };
+  });
+}
+
+function parseUmsatzweckerMail(mail) {
+  return parseUmsatzweckerTransactions(mail)[0] || null;
 }
 
 function createSparkasseMailPoller({ onTransaction, onDebug }) {
@@ -183,10 +211,14 @@ function createSparkasseMailPoller({ onTransaction, onDebug }) {
           const msg = await client.fetchOne(uid, { source: true, envelope: true, uid: true });
           if (!msg?.source) continue;
           const parsed = await simpleParser(msg.source);
-          const tx = parseUmsatzweckerMail(parsed);
+          const transactions = parseUmsatzweckerTransactions(parsed);
           const messageId = parsed.messageId || `${mailbox}:${uid}`;
-          if (tx) {
-            await onTransaction({ ...tx, messageId, receivedAt: new Date().toISOString() });
+          if (transactions.length) {
+            const receivedAt = new Date().toISOString();
+            for (const tx of transactions) {
+              const indexedMessageId = transactions.length > 1 ? `${messageId}#${tx.transactionIndex + 1}` : messageId;
+              await onTransaction({ ...tx, messageId: indexedMessageId, originalMessageId: messageId, receivedAt });
+            }
           } else if (onDebug) {
             await onDebug({ messageId, subject: parsed.subject || '', reason: 'not-parsed' });
           }
@@ -220,4 +252,4 @@ function createSparkasseMailPoller({ onTransaction, onDebug }) {
   };
 }
 
-module.exports = { createSparkasseMailPoller, parseUmsatzweckerMail };
+module.exports = { createSparkasseMailPoller, parseUmsatzweckerMail, parseUmsatzweckerTransactions };
