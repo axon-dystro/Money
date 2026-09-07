@@ -66,7 +66,10 @@ function bucketBudget(b) { return monthlyEquivalent(bucketBaseAmount(b), b.frequ
 function costBudget(c) { return monthlyEquivalent(c.amount, c.frequency, c.dueDate); }
 function costBufferEnabled() { return data.settings?.costBufferEnabled !== false; }
 function bucketName(id) { return (data.budgetBuckets || []).find(b => b.id === id)?.name || 'Freie Verwendung'; }
-function freeBucketId() { return (data.budgetBuckets || []).find(b => b.system === 'free_use' || b.id === 'bucket_frei')?.id || activeBuckets()[0]?.id || ''; }
+function freeBucketId() {
+  const free = (data.budgetBuckets || []).find(b => (b.system === 'free_use' || b.id === 'bucket_frei') && b.active !== false);
+  return free?.id || activeBuckets()[0]?.id || '';
+}
 function transactionLabel(x) {
   if (x.kind === 'fixedCosts') return (data.fixedCosts || []).find(c => c.id === x.costId)?.name || x.category || 'Fixkosten';
   if (x.kind === 'cancelableCosts') return (data.cancelableCosts || []).find(c => c.id === x.costId)?.name || x.category || 'Kündbare Kosten';
@@ -178,20 +181,22 @@ function totals() {
   const plannedBuffer = plannedBufferTotal('fixedCosts') + plannedBufferTotal('cancelableCosts');
   const heldBuffer = costBufferEnabled() ? plannedBuffer : 0;
   const releasedBuffer = costBufferEnabled() ? 0 : plannedBuffer;
-  const reserved = activeBuckets().reduce((s, b) => s + bucketBudget(b), 0);
+  const bucketStatuses = activeBuckets().map(b => bucketStatus(b));
+  const reserved = bucketStatuses.reduce((s, st) => s + st.total, 0);
+  const reservedOpen = bucketStatuses.reduce((s, st) => s + Math.max(0, st.left), 0);
   const expenses = monthExpenses();
   const budgetExpenses = expenses.filter(e => e.kind !== 'fixedCosts' && e.kind !== 'cancelableCosts');
   const allSpent = budgetExpenses.reduce((total, e) => total + expenseAmount(e), 0);
   const bucketIds = new Set(activeBuckets().map(b=>b.id));
   const unbucketed = budgetExpenses.filter(e=>!e.bucketId || !bucketIds.has(e.bucketId)).reduce((a,e)=>a+expenseAmount(e),0);
-  const overspend = activeBuckets().reduce((a,b)=>{ const st=bucketStatus(b); return a+Math.max(0,-st.left); },0);
+  const overspend = bucketStatuses.reduce((a,st)=>a+Math.max(0,-st.left),0);
   const unplanned = totalIncome - running - reserved - unbucketed - overspend;
   const currentBalance = currentBalanceValue();
   const openRunning = openFixed + openCancel;
-  const realAvailable = currentBalance === null ? unplanned - heldBuffer : currentBalance - openRunning - reserved - overspend - heldBuffer;
+  const realAvailable = currentBalance === null ? unplanned - heldBuffer : currentBalance - openRunning - reservedOpen - overspend - heldBuffer;
   const reserveAvailable = currentBalance === null ? null : currentBalance - openRunning;
-  const openAndReserved = openRunning + reserved;
-  return { fixed, cancel, openFixed, openCancel, fixedPlanned, cancelPlanned, extra, totalIncome, currentBalance, openRunning, openAndReserved, running, plannedRunning, plannedBuffer, heldBuffer, releasedBuffer, reserved, allSpent, unplanned, realAvailable, reserveAvailable };
+  const openAndReserved = openRunning + reservedOpen;
+  return { fixed, cancel, openFixed, openCancel, fixedPlanned, cancelPlanned, extra, totalIncome, currentBalance, openRunning, openAndReserved, running, plannedRunning, plannedBuffer, heldBuffer, releasedBuffer, reserved, reservedOpen, allSpent, unplanned, realAvailable, reserveAvailable };
 }
 function reserveFloorForMonth() {
   const now = new Date();
@@ -236,7 +241,7 @@ function moneyFlowRows(t) {
     <div class="flow-row"><span>Aktueller Saldo</span><b>${t.currentBalance === null ? 'nicht gesetzt' : euro(t.currentBalance)}</b></div>
     <div class="flow-row"><span>Offene Fixkosten</span><b>-${euro(t.openFixed)}</b></div>
     <div class="flow-row"><span>Offen kündbar</span><b>-${euro(t.openCancel)}</b></div>
-    <div class="flow-row"><span>Budget-Töpfe</span><b>-${euro(t.reserved)}</b></div>
+    <div class="flow-row"><span>Budget-Töpfe offen</span><b>-${euro(t.reservedOpen)}</b></div>
     <div class="flow-row total"><span>Verfügbar</span><b>${balanceVisible ? euro(t.realAvailable) : '•••• €'}</b></div>`;
 }
 function bucketCardHtml(b, compact = false) {
@@ -316,9 +321,7 @@ function renderBuckets() {
     const monthly = bucketBudget(b);
     const isFree = b.system === 'free_use' || b.id === 'bucket_frei';
     const deleteDisabled = isFree ? 'disabled title="Freie Verwendung kann nicht gelöscht werden"' : '';
-    const stateButton = isFree
-      ? '<button class="state-btn" type="button" disabled>Standard</button>'
-      : `<button class="state-btn" type="button" onclick="toggleBucket('${b.id}',${b.active !== false ? 'false' : 'true'})">${b.active !== false ? 'Pause' : 'Aktiv'}</button>`;
+    const stateButton = `<button class="state-btn" type="button" onclick="toggleBucket('${b.id}',${b.active !== false ? 'false' : 'true'})">${b.active !== false ? 'Pause' : 'Aktiv'}</button>`;
     return `<div class="row settings-row">
       <div><b>${esc(b.name)}</b><small>${b.active === false ? 'inaktiv · ' : ''}${details} ${frequencyLabel(b.frequency)} · Monatsanteil ${euro(monthly)} · ${b.periods || 4} Abschnitt(e)</small></div>
       ${stateButton}
