@@ -121,7 +121,7 @@ function ensureBuckets(rawBuckets) {
     free.id = free.id || 'bucket_frei';
     free.name = 'Freie Verwendung';
     free.system = 'free_use';
-    free.active = true;
+    free.active = free.active !== false;
     free.mode = free.mode || 'money';
     free.periods = free.periods || 4;
   }
@@ -465,7 +465,7 @@ app.patch('/api/bucket/:id', (req, res) => {
   const b = d.budgetBuckets.find(x => x.id === req.params.id);
   if (!b) return res.status(404).json({ error: 'not found' });
   Object.assign(b, cleanBucket(req.body, b));
-  if (b.system === 'free_use') { b.name = 'Freie Verwendung'; b.active = true; }
+  if (b.system === 'free_use') b.name = 'Freie Verwendung';
   save(d); res.json(d);
 });
 app.delete('/api/bucket/:id', (req, res) => {
